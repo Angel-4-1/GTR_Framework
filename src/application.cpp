@@ -98,7 +98,7 @@ void Application::render(void)
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 	//lets render something
-	Matrix44 model;
+	//Matrix44 model;
 	//renderer->renderPrefab( model, prefab, camera );
 
 	renderer->renderScene(scene, camera);
@@ -119,7 +119,7 @@ void Application::update(double seconds_elapsed)
 	float orbit_speed = seconds_elapsed * 0.5;
 	
 	//async input to move the camera around
-	if (Input::isKeyPressed(SDL_SCANCODE_LSHIFT)) speed *= 10; //move faster with left shift
+	if (Input::isKeyPressed(SDL_SCANCODE_LSHIFT)) speed *= 20; //move faster with left shift
 	if (Input::isKeyPressed(SDL_SCANCODE_W) || Input::isKeyPressed(SDL_SCANCODE_UP)) camera->move(Vector3(0.0f, 0.0f, 1.0f) * speed);
 	if (Input::isKeyPressed(SDL_SCANCODE_S) || Input::isKeyPressed(SDL_SCANCODE_DOWN)) camera->move(Vector3(0.0f, 0.0f,-1.0f) * speed);
 	if (Input::isKeyPressed(SDL_SCANCODE_A) || Input::isKeyPressed(SDL_SCANCODE_LEFT)) camera->move(Vector3(1.0f, 0.0f, 0.0f) * speed);
@@ -148,6 +148,8 @@ void Application::update(double seconds_elapsed)
 			}
 		}
 	}
+
+	
 	
 	//move up or down the camera using Q and E
 	if (Input::isKeyPressed(SDL_SCANCODE_Q)) camera->moveGlobal(Vector3(0.0f, -1.0f, 0.0f) * speed);

@@ -17,7 +17,9 @@ namespace GTR {
 	public:
 
 		//add here your functions
-		//...
+		std::vector<BaseEntity*> render_calls;
+		void createRenderCalls(GTR::Scene* scene, Camera* camera);
+		/****************/
 
 		//renders several elements of the scene
 		void renderScene(GTR::Scene* scene, Camera* camera);

@@ -1,17 +1,25 @@
 {
-	"entities":[
-		{
-			"name":"car1",
-			"type":"PREFAB",
-			"filename":"prefabs/gmc/scene.gltf",
-			"position":[0,0,0]
-		},
-		{
-			"name":"car2",
-			"type":"PREFAB",
-			"filename":"prefabs/gmc/scene.gltf",
-			"position":[300,0,0],
-			"angle":45
-		}
-	]
+  "entities": [
+    {
+      "name": "car1",
+      "type": "PREFAB",
+      "filename": "prefabs/gmc/scene.gltf",
+      "position": [ 0, 0, 0 ]
+    },
+    {
+      "name": "car2",
+      "type": "PREFAB",
+      "filename": "prefabs/gmc/scene.gltf",
+      "position": [ 300, 0, 0 ],
+      "angle": 45
+    },
+    {
+      "name": "ambulance",
+      "type": "PREFAB",
+      "filename": "prefabs/ambulance/scene.gltf",
+      "position": [ 210, 3.4, -200 ],
+      "angle": 300,
+      "scale": [ 1.25, 1.25, 1.25 ]
+    }
+  ]
 }

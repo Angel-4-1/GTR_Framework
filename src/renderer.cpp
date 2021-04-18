@@ -10,15 +10,18 @@
 #include "scene.h"
 #include "extra/hdre.h"
 
+#include <algorithm>
 
 using namespace GTR;
 
 void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
 {
-	for (int i = 0; i < scene->entities.size(); ++i)
+	createRenderCalls(scene,camera);
+
+	for (int i = 0; i < render_calls.size(); ++i)
 	{
-		BaseEntity* ent = scene->entities[i];
-		if (!ent->visible)
+		BaseEntity* ent = render_calls[i];
+		if (!ent->visible || ent == nullptr)
 			continue;
 
 		//is a prefab!
@@ -29,6 +32,42 @@ void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
 				renderPrefab(ent->model, pent->prefab, camera);
 		}
 	}
+}
+
+// Calculate distance between two 3D points using the pythagoras theorem
+float distance(float x1, float y1, float z1, float x2, float y2, float z2)
+{
+	return sqrt(pow(x2 - x1, 2.0) + pow(y2 - y1, 2.0) + pow(z2 - z1, 2.0));
+}
+
+struct compareDistanceToCamera {
+	Vector3 cam_pos;
+
+	compareDistanceToCamera(Vector3 _cam_pos) : cam_pos(_cam_pos) {}
+
+	bool operator ()(BaseEntity* ent1, BaseEntity* ent2) const {
+		Vector3 pos1 = ent1->model.getTranslation();
+		Vector3 pos2 = ent2->model.getTranslation();
+		float d1_to_cam = distance(pos1.x, pos1.y, pos1.z, cam_pos.x, cam_pos.y, cam_pos.z);
+		float d2_to_cam = distance(pos2.x, pos2.y, pos2.z, cam_pos.x, cam_pos.y, cam_pos.z);
+
+		return (d1_to_cam > d2_to_cam);
+	}
+};
+
+void Renderer::createRenderCalls(GTR::Scene* scene, Camera* camera) {
+	render_calls.clear();
+
+	for (int i = 0; i < scene->entities.size(); ++i)
+	{
+		BaseEntity* ent = scene->entities[i];
+		if (!ent->visible)
+			continue;
+		
+		render_calls.push_back(ent);
+	}
+
+	std::sort(render_calls.begin(), render_calls.end(), compareDistanceToCamera(camera->eye));
 }
 
 //renders all the prefab
