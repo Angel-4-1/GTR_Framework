@@ -17,20 +17,20 @@ using namespace GTR;
 void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
 {
 	createRenderCalls(scene,camera);
+	
+	// render the nodes
+	renderRenderCalls(render_calls, camera);
+}
 
-	for (int i = 0; i < render_calls.size(); ++i)
+void Renderer::renderRenderCalls(std::vector< renderCall > data, Camera* camera) {
+
+	for (int i = 0; i < data.size(); ++i)
 	{
-		BaseEntity* ent = render_calls[i];
-		if (!ent->visible || ent == nullptr)
+		GTR::Node* node = data[i].node;
+		if (node == nullptr)
 			continue;
 
-		//is a prefab!
-		if (ent->entity_type == PREFAB)
-		{
-			PrefabEntity* pent = (GTR::PrefabEntity*)ent;
-			if(pent->prefab)
-				renderPrefab(ent->model, pent->prefab, camera);
-		}
+		renderSingleNode(*data[i].prefab_model, node, camera, data[i].isAlpha);
 	}
 }
 
@@ -41,22 +41,26 @@ float distance(float x1, float y1, float z1, float x2, float y2, float z2)
 }
 
 struct compareDistanceToCamera {
-	Vector3 cam_pos;
+	compareDistanceToCamera(){}
 
-	compareDistanceToCamera(Vector3 _cam_pos) : cam_pos(_cam_pos) {}
+	bool operator ()(renderCall rc1, renderCall rc2) const {
+		return (rc1.distance_to_camera > rc2.distance_to_camera);
+	}
+};
 
-	bool operator ()(BaseEntity* ent1, BaseEntity* ent2) const {
-		Vector3 pos1 = ent1->model.getTranslation();
-		Vector3 pos2 = ent2->model.getTranslation();
-		float d1_to_cam = distance(pos1.x, pos1.y, pos1.z, cam_pos.x, cam_pos.y, cam_pos.z);
-		float d2_to_cam = distance(pos2.x, pos2.y, pos2.z, cam_pos.x, cam_pos.y, cam_pos.z);
+struct compareAlpha {
 
-		return (d1_to_cam > d2_to_cam);
+	compareAlpha() {}
+
+	bool operator ()(renderCall rc1, renderCall rc2) const {
+		return (!rc1.isAlpha && rc2.isAlpha);
 	}
 };
 
 void Renderer::createRenderCalls(GTR::Scene* scene, Camera* camera) {
+	// prepre the vector
 	render_calls.clear();
+	bool isAlpha = false;
 
 	for (int i = 0; i < scene->entities.size(); ++i)
 	{
@@ -64,10 +68,63 @@ void Renderer::createRenderCalls(GTR::Scene* scene, Camera* camera) {
 		if (!ent->visible)
 			continue;
 		
-		render_calls.push_back(ent);
+		isAlpha = false;
+		
+		if (ent->entity_type == PREFAB)
+		{
+			PrefabEntity* pent = (GTR::PrefabEntity*)ent;
+			if (pent->prefab)
+			{
+				GTR::Prefab* prefab = pent->prefab;
+				GTR::Node* node = &prefab->root;
+				// Check if the node has an alpha blending property
+				renderCall rc;
+				rc.node = node; rc.prefab_model = &pent->model;
+				
+				if (node->mesh && node->material) {
+					if (node->material->alpha_mode == GTR::eAlphaMode::BLEND) {
+						rc.isAlpha = true;
+					}
+					rc.distance_to_camera = computeDistanceToCamera(node, &pent->model, camera->eye);
+				}
+
+				render_calls.push_back(rc);
+
+				checkAlphaComponent(node, &ent->model, camera->eye);
+			}
+		}
 	}
 
-	std::sort(render_calls.begin(), render_calls.end(), compareDistanceToCamera(camera->eye));
+	// sort alpha elements
+	std::sort(render_calls.begin(), render_calls.end(), compareDistanceToCamera());
+	std::sort(render_calls.begin(), render_calls.end(), compareAlpha());
+}
+
+void Renderer::checkAlphaComponent(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos) {
+	// Check all the children of a node until one with alpha blending property is found
+	for (int i = 0; i < node->children.size(); ++i)
+	{
+		GTR::Node* node_child = node->children[i];
+		renderCall rc; //ew renderCall(node, Vector3(), &ent->model);
+		rc.node = node_child; rc.prefab_model = prefab_model;
+		if (node_child->mesh && node_child->material) {
+			if (node_child->material->alpha_mode == GTR::eAlphaMode::BLEND) {
+				rc.isAlpha = true;
+			}
+			rc.distance_to_camera = computeDistanceToCamera(node_child, prefab_model, cam_pos);
+		}
+
+		render_calls.push_back(rc);
+		checkAlphaComponent(node_child, prefab_model, cam_pos);
+	}
+}
+
+float Renderer::computeDistanceToCamera(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos) {
+	Matrix44 node_model = node->getGlobalMatrix(true) * (*prefab_model);
+	BoundingBox world_bounding = transformBoundingBox(node_model, node->mesh->box);
+	Vector3 center = world_bounding.center;
+
+	return distance(center.x, center.y, center.z, cam_pos.x, cam_pos.y, cam_pos.z);;
 }
 
 //renders all the prefab
@@ -98,7 +155,9 @@ void Renderer::renderNode(const Matrix44& prefab_model, GTR::Node* node, Camera*
 		{
 			//render node mesh
 			renderMeshWithMaterial( node_model, node->mesh, node->material, camera );
-			//node->mesh->renderBounding(node_model, true);
+			if (isRenderingBoundingBox) {
+				node->mesh->renderBounding(node_model, true);
+			}
 		}
 	}
 
@@ -107,6 +166,39 @@ void Renderer::renderNode(const Matrix44& prefab_model, GTR::Node* node, Camera*
 		renderNode(prefab_model, node->children[i], camera);
 }
 
+void Renderer::renderSingleNode(const Matrix44& prefab_model, GTR::Node* node, Camera* camera, bool hasAlpha)
+{
+	if (!node->visible)
+		return;
+
+	if ( (renderer_cond == eRendererCondition::REND_COND_NO_ALPHA) && hasAlpha) {
+		return;
+	}
+
+	if ( (renderer_cond == eRendererCondition::REND_COND_ALPHA) && !hasAlpha) {
+		return;
+	}
+
+	//compute global matrix
+	Matrix44 node_model = node->getGlobalMatrix(true) * prefab_model;
+
+	//does this node have a mesh? then we must render it
+	if (node->mesh && node->material)
+	{
+		//compute the bounding box of the object in world space (by using the mesh bounding box transformed to world space)
+		BoundingBox world_bounding = transformBoundingBox(node_model, node->mesh->box);
+
+		//if bounding box is inside the camera frustum then the object is probably visible
+		if (camera->testBoxInFrustum(world_bounding.center, world_bounding.halfsize))
+		{
+			//render node mesh
+			renderMeshWithMaterial(node_model, node->mesh, node->material, camera);
+			if (isRenderingBoundingBox) {
+				node->mesh->renderBounding(node_model, true);
+			}
+		}
+	}
+}
 //renders a mesh given its transform and material
 void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera)
 {
@@ -118,9 +210,9 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	//define locals to simplify coding
 	Shader* shader = NULL;
 	Texture* texture = NULL;
+	
 
 	texture = material->color_texture.texture;
-	//texture = material->emissive_texture;
 	//texture = material->metallic_roughness_texture;
 	//texture = material->normal_texture;
 	//texture = material->occlusion_texture;
@@ -144,7 +236,8 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
     assert(glGetError() == GL_NO_ERROR);
 
 	//chose a shader
-	shader = Shader::Get("texture");
+	//shader = Shader::Get("texture");
+	shader = Shader::Get("light");
 
     assert(glGetError() == GL_NO_ERROR);
 
@@ -159,8 +252,15 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	shader->setUniform("u_model", model );
 
 	shader->setUniform("u_color", material->color);
+	shader->setUniform("u_ambient_light", GTR::Scene::instance->ambient_color);
 	if(texture)
 		shader->setUniform("u_texture", texture, 0);
+
+	if (material->emissive_factor.length()) {
+		Texture* emissive_texture = NULL;
+		emissive_texture = material->emissive_texture.texture;
+		shader->setUniform("u_emissive_texture", emissive_texture, 1);
+	}
 
 	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
 	shader->setUniform("u_alpha_cutoff", material->alpha_mode == GTR::eAlphaMode::MASK ? material->alpha_cutoff : 0);
@@ -175,6 +275,13 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	glDisable(GL_BLEND);
 }
 
+void Renderer::renderInMenu()
+{
+#ifndef SKIP_IMGUI
+	ImGui::Checkbox("BoundingBox", &isRenderingBoundingBox);
+	ImGui::Combo("Alpha", (int*)&renderer_cond, "NONE\0ALPHA\0NOALPHA", 3);
+#endif
+}
 
 Texture* GTR::CubemapFromHDRE(const char* filename)
 {

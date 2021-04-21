@@ -57,6 +57,7 @@ namespace GTR {
 	{
 	public:
 		static Scene* instance;
+		Vector3 ambient_color;
 
 		Scene();
 

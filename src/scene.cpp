@@ -9,6 +9,7 @@ GTR::Scene* GTR::Scene::instance = NULL;
 GTR::Scene::Scene()
 {
 	instance = this;
+	ambient_color.set(1.0, 1.0, 1.0);
 }
 
 void GTR::Scene::clear()

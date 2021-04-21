@@ -246,6 +246,13 @@ void Application::renderDebugGUI(void)
 
 	ImGui::Checkbox("Wireframe", &render_wireframe);
 	ImGui::ColorEdit4("BG color", bg_color.v);
+	ImGui::ColorEdit4("Ambient light", scene->ambient_color.v);
+
+	//add info to the debug panel about which entities render (all, only the ones with alpha blending, or the opposite)
+	if (ImGui::TreeNode(renderer, "Renderer Conditions")) {
+		renderer->renderInMenu();
+		ImGui::TreePop();
+	}
 
 	//add info to the debug panel about the camera
 	if (ImGui::TreeNode(camera, "Camera")) {

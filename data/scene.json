@@ -20,6 +20,13 @@
       "position": [ 210, 3.4, -200 ],
       "angle": 300,
       "scale": [ 1.25, 1.25, 1.25 ]
+    },
+    {
+      "name": "pontiac",
+      "type": "PREFAB",
+      "filename": "prefabs/pontiac/scene.gltf",
+      "position": [ 30, 3.4, -420 ],
+      "angle": 50
     }
   ]
 }

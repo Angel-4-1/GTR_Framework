@@ -8,6 +8,25 @@ namespace GTR {
 
 	class Prefab;
 	class Material;
+
+	enum eRendererCondition {
+		REND_COND_NONE= 0,
+		REND_COND_ALPHA = 1,
+		REND_COND_NO_ALPHA = 2
+	};
+
+	class renderCall {
+	public:
+		Node* node;
+		float distance_to_camera;
+		Matrix44* prefab_model;
+		bool isAlpha;
+
+		renderCall() {
+			isAlpha = false;
+			distance_to_camera = 9999.0;
+		}
+	};
 	
 	// This class is in charge of rendering anything in our system.
 	// Separating the render from anything else makes the code cleaner
@@ -17,8 +36,15 @@ namespace GTR {
 	public:
 
 		//add here your functions
-		std::vector<BaseEntity*> render_calls;
+		bool isRenderingBoundingBox = false;
+		eRendererCondition renderer_cond = eRendererCondition::REND_COND_NONE;
+		std::vector< renderCall > render_calls;		// store nodes 
 		void createRenderCalls(GTR::Scene* scene, Camera* camera);
+		void checkAlphaComponent(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
+		void renderInMenu();
+		void renderSingleNode(const Matrix44& prefab_model, GTR::Node* node, Camera* camera, bool hasAlpha);
+		void renderRenderCalls(std::vector< renderCall > data, Camera* camera);
+		float computeDistanceToCamera(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
 		/****************/
 
 		//renders several elements of the scene
