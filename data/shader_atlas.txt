@@ -4,6 +4,10 @@ texture basic.vs texture.fs
 depth quad.vs depth.fs
 multi basic.vs multi.fs
 light basic.vs light.fs
+normal basic.vs normal.fs
+normalmap basic.vs normalmap.fs
+uvs basic.vs uvs.fs
+metallic basic.vs metallic.fs
 
 \basic.vs
 
@@ -117,9 +121,14 @@ in vec4 v_color;
 uniform vec4 u_color;
 uniform sampler2D u_texture;
 uniform sampler2D u_emissive_texture;
+uniform sampler2D u_metallic_roughness_texture;
 uniform float u_time;
 uniform float u_alpha_cutoff;
 uniform vec3 u_ambient_light;
+
+uniform bool u_is_emissor;
+uniform bool u_has_metallic_roughness;
+uniform vec3 u_emissive_factor;
 
 out vec4 FragColor;
 
@@ -131,14 +140,25 @@ void main()
 
 	if(color.a < u_alpha_cutoff)
 		discard;
-	
-	vec4 emissive = texture( u_emissive_texture, v_uv );
 
 	vec3 light = u_ambient_light;
 
+	vec3 N = normalize( v_normal );
+
+	if(u_has_metallic_roughness){
+		float occlusion = texture( u_metallic_roughness_texture, v_uv ).x;
+		light *= occlusion;
+	}
+
 	vec4 final_color = color;
 	final_color.xyz *= light;
-	final_color.xyz += emissive.xyz;
+
+	if (u_is_emissor) {
+		vec4 emissive = texture( u_emissive_texture, v_uv );
+		emissive.xyz *= u_emissive_factor.xyz;
+		final_color.xyz += emissive.xyz;
+	}
+
 	FragColor = final_color;
 }
 
@@ -228,4 +248,90 @@ void main()
 
 	//calcule the position of the vertex using the matrices
 	gl_Position = u_viewprojection * vec4( v_world_position, 1.0 );
+}
+
+
+\normal.fs
+
+#version 330 core
+
+in vec3 v_normal;
+
+out vec4 FragColor;
+
+void main()
+{
+	FragColor = vec4( abs(normalize(v_normal)), 1.0 );
+}
+
+
+\normalmap.fs
+
+#version 330 core
+
+in vec3 v_normal;
+in vec2 v_uv;
+
+uniform sampler2D u_normal_texture;
+uniform bool u_has_normal;
+
+out vec4 FragColor;
+
+void main()
+{
+	if (!u_has_normal) {
+		discard;
+	}
+
+	vec3 normalmap_texture = texture( u_normal_texture, v_uv ).xyz;
+
+	FragColor = vec4(normalmap_texture, 1.0);
+}
+
+
+\uvs.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+out vec4 FragColor;
+
+void main()
+{
+	FragColor = vec4(v_uv, 1.0, 1.0);
+}
+
+
+\metallic.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_metallic_roughness_texture;
+uniform bool u_has_metallic_roughness;
+uniform int u_type_property;
+
+out vec4 FragColor;
+
+void main()
+{
+	if( !u_has_metallic_roughness )
+	{
+		discard;
+	}
+
+	vec2 uv = v_uv;
+	float metallic;
+
+	if( u_type_property == 0 ) {		 	 //occlusion
+		metallic = texture( u_metallic_roughness_texture, v_uv ).x;
+	} else if ( u_type_property == 1) { 	 //metallic
+		metallic = texture( u_metallic_roughness_texture, v_uv ).z;
+	} else {							     //roughness
+		metallic = texture( u_metallic_roughness_texture, v_uv ).y;
+	}
+
+	FragColor = vec4(metallic, metallic, metallic, 1.0);
 }

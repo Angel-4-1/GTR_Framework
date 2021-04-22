@@ -9,7 +9,6 @@ GTR::Scene* GTR::Scene::instance = NULL;
 GTR::Scene::Scene()
 {
 	instance = this;
-	ambient_color.set(1.0, 1.0, 1.0);
 }
 
 void GTR::Scene::clear()
@@ -49,6 +48,10 @@ bool GTR::Scene::load(const char* filename)
 		return false;
 	}
 
+	//read global properties
+	background_color = readJSONVector3(json, "background_color", background_color);
+	ambient_light = readJSONVector3(json, "ambient_light", ambient_light);
+
 	//entities
 	cJSON* entities_json = cJSON_GetObjectItemCaseSensitive(json, "entities");
 	cJSON* entity_json;
@@ -59,7 +62,8 @@ bool GTR::Scene::load(const char* filename)
 		if (!ent)
 		{
 			std::cout << " - ENTITY TYPE UNKNOWN: " << type_str << std::endl;
-			continue;
+			//continue;
+			ent = new BaseEntity();
 		}
 
 		addEntity(ent);
@@ -112,6 +116,9 @@ GTR::BaseEntity* GTR::Scene::createEntity(std::string type)
 {
 	if (type == "PREFAB")
 		return new GTR::PrefabEntity();
+	else if (type == "LIGHT")
+		return new GTR::LightEntity();
+	return NULL;
 }
 
 void GTR::BaseEntity::renderInMenu()
@@ -138,7 +145,7 @@ void GTR::PrefabEntity::configure(cJSON* json)
 	if (cJSON_GetObjectItem(json, "filename"))
 	{
 		filename = cJSON_GetObjectItem(json, "filename")->valuestring;
-		prefab = GTR::Prefab::Get( (std::string("data/") + filename).c_str());
+		prefab = GTR::Prefab::Get((std::string("data/") + filename).c_str());
 	}
 }
 
@@ -156,3 +163,65 @@ void GTR::PrefabEntity::renderInMenu()
 #endif
 }
 
+GTR::LightEntity::LightEntity()
+{
+	light_type = POINT;
+	intensity = 0;
+	max_distance = 0;
+	cone_angle = 0;
+	area_size = 0;
+}
+
+
+void GTR::LightEntity::configure(cJSON* json)
+{
+	if (cJSON_GetObjectItem(json, "category"))
+	{
+		std::string category = cJSON_GetObjectItem(json, "category")->valuestring;
+		
+		if (category == "POINT")
+			light_type = POINT;
+		else if ( category == "SPOT")
+			light_type = SPOT;
+		else if (category == "DIRECTIONAL")
+			light_type = DIRECTIONAL;
+	}
+
+	if (cJSON_GetObjectItem(json, "color"))
+	{
+		color = readJSONVector3(json, "color", Vector3(1, 1, 1));
+	}
+
+	if (cJSON_GetObjectItem(json, "intensity"))
+	{
+		intensity = cJSON_GetObjectItem(json, "intensity")->valuedouble;
+	}
+
+	if (cJSON_GetObjectItem(json, "max_distance"))
+	{
+		max_distance = cJSON_GetObjectItem(json, "max_distance")->valuedouble;
+	}
+
+	if (cJSON_GetObjectItem(json, "cone_angle"))
+	{
+		cone_angle = cJSON_GetObjectItem(json, "cone_angle")->valuedouble;
+	}
+
+	if (cJSON_GetObjectItem(json, "area_size"))
+	{
+		area_size = cJSON_GetObjectItem(json, "area_size")->valuedouble;
+	}
+}
+
+void GTR::LightEntity::renderInMenu()
+{
+#ifndef SKIP_IMGUI
+	ImGuiMatrix44(model, "Model");
+	ImGui::Combo("Light Type", (int*)&light_type, "POINT\0SPOT\0DIRECTIONAL", 3);
+	ImGui::ColorEdit3("Color", color.v);
+	ImGui::SliderFloat("Intensity", &intensity, 0, 100);
+	ImGui::SliderFloat("Max distance", &max_distance, 0, 1000);
+	ImGui::SliderFloat("Cone Angle", &cone_angle, 0, 360);
+	ImGui::SliderFloat("Area size", &area_size, 0, 1000);
+#endif
+}

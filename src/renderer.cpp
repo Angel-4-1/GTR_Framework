@@ -14,8 +14,19 @@
 
 using namespace GTR;
 
+Renderer::Renderer() {
+	render_mode = eRenderMode::SHOW_DEFAULT;
+}
+
 void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
 {
+	//set the clear color (the background color)
+	glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
+
+	// Clear the color and the depth buffer
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	checkGLErrors();
+
 	createRenderCalls(scene,camera);
 	
 	// render the nodes
@@ -210,6 +221,7 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	//define locals to simplify coding
 	Shader* shader = NULL;
 	Texture* texture = NULL;
+	GTR::Scene* scene = GTR::Scene::instance;
 	
 
 	texture = material->color_texture.texture;
@@ -236,8 +248,31 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
     assert(glGetError() == GL_NO_ERROR);
 
 	//chose a shader
-	//shader = Shader::Get("texture");
-	shader = Shader::Get("light");
+	switch (render_mode) {
+		case SHOW_DEFAULT:
+			shader = Shader::Get("light");
+			break;
+		case SHOW_NORMAL:
+			shader = Shader::Get("normal");
+			break;
+		case SHOW_NORMALMAP:
+			shader = Shader::Get("normalmap");
+			break;
+		case SHOW_UVS:
+			shader = Shader::Get("uvs");
+			break;
+		case SHOW_TEXTURE:
+			shader = Shader::Get("texture");
+			break;
+		case SHOW_OCCLUSION:
+		case SHOW_METALLIC:
+		case SHOW_ROUGHNESS:
+			shader = Shader::Get("metallic");
+			break;
+		default:
+			shader = Shader::Get("light");
+			break;
+	}
 
     assert(glGetError() == GL_NO_ERROR);
 
@@ -252,14 +287,60 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	shader->setUniform("u_model", model );
 
 	shader->setUniform("u_color", material->color);
-	shader->setUniform("u_ambient_light", GTR::Scene::instance->ambient_color);
+	shader->setUniform("u_ambient_light", scene->ambient_light);
 	if(texture)
 		shader->setUniform("u_texture", texture, 0);
 
-	if (material->emissive_factor.length()) {
-		Texture* emissive_texture = NULL;
-		emissive_texture = material->emissive_texture.texture;
+	Texture* emissive_texture = NULL;
+	emissive_texture = material->emissive_texture.texture;
+	
+	if (emissive_texture) {
+		shader->setUniform("u_is_emissor", true);
+		shader->setUniform("u_emissive_factor", material->emissive_factor);
 		shader->setUniform("u_emissive_texture", emissive_texture, 1);
+	}
+	else {
+		shader->setUniform("u_is_emissor", false);
+	}
+
+	Texture* normal_texture = NULL;
+	normal_texture = material->normal_texture.texture;
+
+	if (normal_texture) {
+		shader->setUniform("u_has_normal", true);
+		shader->setUniform("u_light_color", Vector3(255,0,0));
+		shader->setUniform("u_light_vector", Vector3(0,1,0));
+		shader->setUniform("u_light_position", Vector3(10,10,0));
+		shader->setUniform("u_normal_texture", normal_texture, 2);
+	}
+	else {
+		shader->setUniform("u_has_normal", false);
+	}
+
+	Texture* metallic_roughness_texture = NULL;
+	metallic_roughness_texture = material->metallic_roughness_texture.texture;
+	if (metallic_roughness_texture) {
+		shader->setUniform("u_has_metallic_roughness", true);
+		shader->setUniform("u_metallic_roughness_texture", metallic_roughness_texture, 3);
+		shader->setUniform("u_material_shininess", material->roughness_factor);
+		int type_property = 0;
+		switch (render_mode) {
+			case SHOW_OCCLUSION:
+				type_property = 0;
+				break;
+			case SHOW_METALLIC:
+				type_property = 1;
+				break;
+			case SHOW_ROUGHNESS:
+				type_property = 2;
+				break;
+			default:
+				break;
+		}
+		shader->setUniform("u_type_property", type_property);
+	}
+	else {
+		shader->setUniform("u_has_metallic_roughness", false);
 	}
 
 	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
@@ -280,6 +361,7 @@ void Renderer::renderInMenu()
 #ifndef SKIP_IMGUI
 	ImGui::Checkbox("BoundingBox", &isRenderingBoundingBox);
 	ImGui::Combo("Alpha", (int*)&renderer_cond, "NONE\0ALPHA\0NOALPHA", 3);
+	ImGui::Combo("Render Mode", (int*)&render_mode, "DEFAULT\0TEXTURE\0NORMAL\0NORMALMAP\0UVS\0OCCLUSION\0METALLIC\0ROUGHNESS", 6);
 #endif
 }
 

@@ -15,6 +15,17 @@ namespace GTR {
 		REND_COND_NO_ALPHA = 2
 	};
 
+	enum eRenderMode {
+		SHOW_DEFAULT = 0,
+		SHOW_TEXTURE = 1,
+		SHOW_NORMAL = 2,
+		SHOW_NORMALMAP = 3,
+		SHOW_UVS = 4,
+		SHOW_OCCLUSION = 5,
+		SHOW_METALLIC  = 6,
+		SHOW_ROUGHNESS = 7
+	};
+
 	class renderCall {
 	public:
 		Node* node;
@@ -45,7 +56,9 @@ namespace GTR {
 		void renderSingleNode(const Matrix44& prefab_model, GTR::Node* node, Camera* camera, bool hasAlpha);
 		void renderRenderCalls(std::vector< renderCall > data, Camera* camera);
 		float computeDistanceToCamera(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
-		/****************/
+		
+		Renderer();
+		eRenderMode render_mode;
 
 		//renders several elements of the scene
 		void renderScene(GTR::Scene* scene, Camera* camera);
