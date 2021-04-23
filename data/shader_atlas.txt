@@ -125,31 +125,73 @@ uniform sampler2D u_metallic_roughness_texture;
 uniform float u_time;
 uniform float u_alpha_cutoff;
 uniform vec3 u_ambient_light;
+uniform vec3 u_camera_position;
 
 uniform bool u_is_emissor;
 uniform bool u_has_metallic_roughness;
 uniform vec3 u_emissive_factor;
+uniform int u_light_type;
+uniform vec3 u_light_position;
+uniform vec3 u_light_vector;
+uniform vec3 u_light_color;
 
 out vec4 FragColor;
 
 void main()
 {
-	vec2 uv = v_uv;
+	//texture coordinates
+	vec2 uv = v_uv; 
+	
+	//get color from the texture
 	vec4 color = u_color;
 	color *= texture( u_texture, v_uv );
 
 	if(color.a < u_alpha_cutoff)
 		discard;
 
+	//amount of light
 	vec3 light = u_ambient_light;
 
+	//normal
 	vec3 N = normalize( v_normal );
+
+	//select type of light
+	vec3 L;
+
+	if ( u_light_type == 0)	//point light
+	{
+		//vector from the point to the light
+		L = u_light_position - v_world_position;
+
+		//we ignore the light distance for now
+		L = normalize(L);
+	}
+	else if ( u_light_type == 1 )	//spot light
+	{
+		//vector from the point to the light
+		L = u_light_position - v_world_position;
+
+		//we ignore the light distance for now
+		L = normalize(L);
+	}
+	else	//directional light
+	{
+		L = u_light_vector;	//same for all pixels
+	}
+
+	//compute how much is aligned
+	float NdotL = dot(N,L);
+	NdotL = clamp( NdotL, 0.0, 1.0 );
+
+	//store the amount of diffuse light
+	light += NdotL * u_light_color;
 
 	if(u_has_metallic_roughness){
 		float occlusion = texture( u_metallic_roughness_texture, v_uv ).x;
 		light *= occlusion;
 	}
 
+	//apply the light to the pixel color 
 	vec4 final_color = color;
 	final_color.xyz *= light;
 

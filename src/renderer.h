@@ -56,6 +56,7 @@ namespace GTR {
 		void renderSingleNode(const Matrix44& prefab_model, GTR::Node* node, Camera* camera, bool hasAlpha);
 		void renderRenderCalls(std::vector< renderCall > data, Camera* camera);
 		float computeDistanceToCamera(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
+		LightEntity* light;
 		
 		Renderer();
 		eRenderMode render_mode;

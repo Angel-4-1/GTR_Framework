@@ -165,11 +165,24 @@ void GTR::PrefabEntity::renderInMenu()
 
 GTR::LightEntity::LightEntity()
 {
+	entity_type = LIGHT;
 	light_type = POINT;
 	intensity = 0;
 	max_distance = 0;
 	cone_angle = 0;
 	area_size = 0;
+}
+
+void GTR::LightEntity::uploadToShader(Shader* shader)
+{
+	shader->setUniform("u_light_position", model.getTranslation());
+	shader->setUniform("u_light_vector", directional_vector);
+	shader->setUniform("u_light_type", (int)light_type);
+	shader->setUniform("u_light_color", color);
+	shader->setUniform("u_intensity", intensity);
+	shader->setUniform("u_max_distance", max_distance);
+	shader->setUniform("u_cone_angle", cone_angle);
+	shader->setUniform("u_area_size", area_size);
 }
 
 
@@ -190,6 +203,13 @@ void GTR::LightEntity::configure(cJSON* json)
 	if (cJSON_GetObjectItem(json, "color"))
 	{
 		color = readJSONVector3(json, "color", Vector3(1, 1, 1));
+	}
+
+	if (cJSON_GetObjectItem(json, "position"))
+	{
+		model.setIdentity();
+		Vector3 position = readJSONVector3(json, "position", Vector3());
+		model.translate(position.x, position.y, position.z);
 	}
 
 	if (cJSON_GetObjectItem(json, "intensity"))

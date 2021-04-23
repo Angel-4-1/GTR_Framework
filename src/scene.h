@@ -2,6 +2,7 @@
 #define SCENE_H
 
 #include "framework.h"
+#include "shader.h"
 #include <string>
 
 //forward declaration
@@ -67,9 +68,11 @@ namespace GTR {
 		float max_distance;	//how faar the light can reach
 		float cone_angle;	//angle in degrees of the conce spotlight
 		float area_size;	//size of the volume for directional light
+		Vector3 directional_vector;
 		eLightType light_type;
 
 		LightEntity();
+		void uploadToShader(Shader* shader);
 		virtual void renderInMenu();
 		virtual void configure(cJSON* json);
 	};

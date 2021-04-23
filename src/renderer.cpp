@@ -104,6 +104,10 @@ void Renderer::createRenderCalls(GTR::Scene* scene, Camera* camera) {
 				checkAlphaComponent(node, &ent->model, camera->eye);
 			}
 		}
+		else if (ent->entity_type == LIGHT)
+		{
+			light = (GTR::LightEntity*)ent;
+		}
 	}
 
 	// sort alpha elements
@@ -308,9 +312,6 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 
 	if (normal_texture) {
 		shader->setUniform("u_has_normal", true);
-		shader->setUniform("u_light_color", Vector3(255,0,0));
-		shader->setUniform("u_light_vector", Vector3(0,1,0));
-		shader->setUniform("u_light_position", Vector3(10,10,0));
 		shader->setUniform("u_normal_texture", normal_texture, 2);
 	}
 	else {
@@ -342,6 +343,9 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	else {
 		shader->setUniform("u_has_metallic_roughness", false);
 	}
+
+	if (light != nullptr)
+		light->uploadToShader(shader);
 
 	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
 	shader->setUniform("u_alpha_cutoff", material->alpha_mode == GTR::eAlphaMode::MASK ? material->alpha_cutoff : 0);
