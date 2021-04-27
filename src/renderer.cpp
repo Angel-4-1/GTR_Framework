@@ -71,6 +71,7 @@ struct compareAlpha {
 void Renderer::createRenderCalls(GTR::Scene* scene, Camera* camera) {
 	// prepre the vector
 	render_calls.clear();
+	lights.clear();
 	bool isAlpha = false;
 
 	for (int i = 0; i < scene->entities.size(); ++i)
@@ -106,7 +107,7 @@ void Renderer::createRenderCalls(GTR::Scene* scene, Camera* camera) {
 		}
 		else if (ent->entity_type == LIGHT)
 		{
-			light = (GTR::LightEntity*)ent;
+			lights.push_back( (GTR::LightEntity*)ent );
 		}
 	}
 
@@ -227,6 +228,7 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	Texture* texture = NULL;
 	GTR::Scene* scene = GTR::Scene::instance;
 	
+	int multiple_lights = 0;
 
 	texture = material->color_texture.texture;
 	//texture = material->metallic_roughness_texture;
@@ -255,6 +257,7 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	switch (render_mode) {
 		case SHOW_DEFAULT:
 			shader = Shader::Get("light");
+			multiple_lights = 1;
 			break;
 		case SHOW_NORMAL:
 			shader = Shader::Get("normal");
@@ -272,6 +275,10 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 		case SHOW_METALLIC:
 		case SHOW_ROUGHNESS:
 			shader = Shader::Get("metallic");
+			break;
+		case SHOW_SINGLEPASS:
+			shader = Shader::Get("singlepass");
+			multiple_lights = 2;
 			break;
 		default:
 			shader = Shader::Get("light");
@@ -344,15 +351,75 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 		shader->setUniform("u_has_metallic_roughness", false);
 	}
 
-	if (light != nullptr)
-		light->uploadToShader(shader);
 
 	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
 	shader->setUniform("u_alpha_cutoff", material->alpha_mode == GTR::eAlphaMode::MASK ? material->alpha_cutoff : 0);
 
-	//do the draw call that renders the mesh into the screen
-	mesh->render(GL_TRIANGLES);
+	//-----------------------
+	//--- MULTIPLE LIGHTS ---
+	//-----------------------
+	if (multiple_lights == 1) 
+	{
+		//allow to render pixels that have the same depth as the one in the depth buffer
+	//	glDepthFunc(GL_LEQUAL);
 
+		//set blending mode to additive this will collide with materials with blend...
+	//	glBlendFunc(GL_SRC_ALPHA, GL_ONE);	//this causes problems with the nodes with alpha blending !!!
+
+		for (int i = 0; i < lights.size(); i++)
+		{
+			LightEntity* light = lights[i];
+			if (light == nullptr)
+				continue;
+
+			//first pass doesn't use blending
+			if (i == 0) {
+				//	glDisable(GL_BLEND);	//if disabled the alpha elements wont be translucid
+			}
+			else {
+				//----------------------------------
+				glDepthFunc(GL_LEQUAL);
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+				//----------------------------------
+				glEnable(GL_BLEND);
+				//do not apply emissive texture again
+				shader->setUniform("u_is_emissor", false);
+				//no add ambient light
+				shader->setUniform("u_ambient_light", Vector3());
+			}
+
+			//pass light to shader
+			light->uploadToShader(shader);
+
+			//do the draw call that renders the mesh into the screen
+			mesh->render(GL_TRIANGLES);
+		}
+	}
+	else if (multiple_lights == 2)
+	{
+		Vector3 light_position[5];
+		Vector3 light_color[5];
+		float light_intensity[5];
+
+		for (int i = 0; i < lights.size(); i++)
+		{
+			light_position[i] = lights[i]->model.getTranslation();
+			light_color[i] = lights[i]->color;
+			light_intensity[i] = lights[i]->intensity;
+		}
+
+		shader->setUniform3Array("u_light_pos", (float*)&light_position, 3);
+		shader->setUniform3Array("u_light_color", (float*)&light_color, 3);
+		shader->setUniform3Array("u_light_intensity", (float*)&light_intensity, 3);
+		shader->setUniform("u_num_lights", 3);
+
+		mesh->render(GL_TRIANGLES);
+	}
+	else {
+		mesh->render(GL_TRIANGLES);
+	}
+	//----------------------
+	
 	//disable shader
 	shader->disable();
 
@@ -365,7 +432,7 @@ void Renderer::renderInMenu()
 #ifndef SKIP_IMGUI
 	ImGui::Checkbox("BoundingBox", &isRenderingBoundingBox);
 	ImGui::Combo("Alpha", (int*)&renderer_cond, "NONE\0ALPHA\0NOALPHA", 3);
-	ImGui::Combo("Render Mode", (int*)&render_mode, "DEFAULT\0TEXTURE\0NORMAL\0NORMALMAP\0UVS\0OCCLUSION\0METALLIC\0ROUGHNESS", 6);
+	ImGui::Combo("Render Mode", (int*)&render_mode, "DEFAULT\0TEXTURE\0NORMAL\0NORMALMAP\0UVS\0OCCLUSION\0METALLIC\0ROUGHNESS\0SINGLEPASS", 7);
 #endif
 }
 

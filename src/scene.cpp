@@ -171,6 +171,8 @@ GTR::LightEntity::LightEntity()
 	max_distance = 0;
 	cone_angle = 0;
 	area_size = 0;
+	spot_cosine_cutoff = 10;
+	spot_exponent = 1;
 }
 
 void GTR::LightEntity::uploadToShader(Shader* shader)
@@ -179,10 +181,12 @@ void GTR::LightEntity::uploadToShader(Shader* shader)
 	shader->setUniform("u_light_vector", directional_vector);
 	shader->setUniform("u_light_type", (int)light_type);
 	shader->setUniform("u_light_color", color);
-	shader->setUniform("u_intensity", intensity);
-	shader->setUniform("u_max_distance", max_distance);
-	shader->setUniform("u_cone_angle", cone_angle);
-	shader->setUniform("u_area_size", area_size);
+	shader->setUniform("u_light_intensity", intensity);
+	shader->setUniform("u_light_max_distance", max_distance);
+	shader->setUniform("u_light_cone_angle", cone_angle);
+	shader->setUniform("u_light_area_size", area_size);
+	shader->setUniform("u_spot_cosine_cutoff", spot_cosine_cutoff);
+	shader->setUniform("u_spot_exponent", spot_exponent);
 }
 
 
@@ -231,17 +235,35 @@ void GTR::LightEntity::configure(cJSON* json)
 	{
 		area_size = cJSON_GetObjectItem(json, "area_size")->valuedouble;
 	}
+	
+	if (cJSON_GetObjectItem(json, "cosine_cutoff"))
+	{
+		spot_cosine_cutoff = cJSON_GetObjectItem(json, "cosine_cutoff")->valuedouble;
+	}
+	
+	if (cJSON_GetObjectItem(json, "spot_exponent"))
+	{
+		spot_exponent = cJSON_GetObjectItem(json, "spot_exponent")->valuedouble;
+	}
+	
+	if (cJSON_GetObjectItem(json, "direction"))
+	{
+		directional_vector = readJSONVector3(json, "direction", Vector3());
+	}
 }
 
 void GTR::LightEntity::renderInMenu()
 {
 #ifndef SKIP_IMGUI
 	ImGuiMatrix44(model, "Model");
-	ImGui::Combo("Light Type", (int*)&light_type, "POINT\0SPOT\0DIRECTIONAL", 3);
+	ImGui::Combo("Light Type", (int*)&light_type, "DIRECTIONAL\0SPOT\0POINT", 3);
 	ImGui::ColorEdit3("Color", color.v);
-	ImGui::SliderFloat("Intensity", &intensity, 0, 100);
+	ImGui::SliderFloat("Intensity", &intensity, 0, 10);
+	ImGui::SliderFloat3("Direction", &directional_vector.x, -10, 10);
 	ImGui::SliderFloat("Max distance", &max_distance, 0, 1000);
-	ImGui::SliderFloat("Cone Angle", &cone_angle, 0, 360);
+	ImGui::SliderFloat("Cone angle", &cone_angle, 0, 360);
 	ImGui::SliderFloat("Area size", &area_size, 0, 1000);
+	ImGui::SliderFloat("Cut off", &spot_cosine_cutoff, 0, 10);
+	ImGui::SliderFloat("Spot exponent", &spot_exponent, 0, 100);
 #endif
 }

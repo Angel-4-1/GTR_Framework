@@ -1,50 +1,74 @@
 {
 	"background_color":[0.3,0.3,0.3],
 	"ambient_light":[1,1,1],
-	"entities":[
-		{
-			"name":"floor",
-			"type":"PREFAB",
-			"filename":"prefabs/floor.glb",
-			"position":[0,-0.1,0]
-		},
-		{
-			"name":"car1",
-			"type":"PREFAB",
-			"filename":"prefabs/gmc/scene.gltf",
-			"position":[-80,0,-100],
-			"angle":-45
-		},
-		{
-			"name":"house",
-			"type":"PREFAB",
-			"filename":"prefabs/house_test/scene.gltf",
-			"position":[300,0,200],
-			"scale":[0.4,0.4,0.4]
-		},
-		{
-			"name":"house",
-			"type":"PREFAB",
-			"filename":"prefabs/house_test/scene.gltf",
-			"position":[300,0,-200],
-			"scale":[0.4,0.4,0.4]
-		},
-		{
-			"name": "pontiac",
-			"type": "PREFAB",
-			"filename": "prefabs/pontiac/scene.gltf",
-			"position": [ 30, 3.4, -420 ],
-			"angle": 50
-		},
-		{
-			"name":"lamp",
-			"type":"LIGHT",
-			"category": "POINT",
-			"position":[0,200,0],
-			"color": [1.0, 0.5, 0.5],
-			"intensity": 1,
-			"max_distance": 10,
-			"cone_angle": 45
-		}
-	]
+  "entities": [
+    {
+      "name": "floor",
+      "type": "PREFAB",
+      "filename": "prefabs/floor.glb",
+      "position": [ 0, -0.1, 0 ]
+    },
+    {
+      "name": "car1",
+      "type": "PREFAB",
+      "filename": "prefabs/gmc/scene.gltf",
+      "position": [ -80, 0, -100 ],
+      "angle": -45
+    },
+    {
+      "name": "house",
+      "type": "PREFAB",
+      "filename": "prefabs/house_test/scene.gltf",
+      "position": [ 300, 0, 200 ],
+      "scale": [ 0.4, 0.4, 0.4 ]
+    },
+    {
+      "name": "house",
+      "type": "PREFAB",
+      "filename": "prefabs/house_test/scene.gltf",
+      "position": [ 300, 0, -200 ],
+      "scale": [ 0.4, 0.4, 0.4 ]
+    },
+    {
+      "name": "pontiac",
+      "type": "PREFAB",
+      "filename": "prefabs/pontiac/scene.gltf",
+      "position": [ 30, 3.4, -420 ],
+      "angle": 50
+    },
+    {
+      "name": "lampDirectional",
+      "type": "LIGHT",
+      "category": "DIRECTIONAL",
+      "position": [ 31, 83, -5.5 ],
+      "color": [ 1.0, 1.0, 1.0 ],
+      "intensity": 0.1,
+      "max_distance": 10,
+      "cone_angle": 45,
+      "direction":  [ 0, -1, 0 ]
+    },
+    {
+      "name": "lampPoint",
+      "type": "LIGHT",
+      "category": "POINT",
+      "position": [ -200, 125, -540 ],
+      "color": [ 1.0, 0.0, 0.0 ],
+      "intensity": 1,
+      "max_distance": 10,
+      "cone_angle": 45
+    },
+    {
+      "name": "lampSpot",
+      "type": "LIGHT",
+      "category": "SPOT",
+      "position": [ -200, 125, 540 ],
+      "color": [ 1.0, 0.0, 0.0 ],
+      "intensity": 1,
+      "max_distance": 10,
+      "cone_angle": 45,
+      "cosine_cutoff": 0.6,
+      "spot_exponent": 1,
+      "direction":  [ 0, -1, 0 ]
+    }
+  ]
 }
