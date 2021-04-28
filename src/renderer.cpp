@@ -394,24 +394,35 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 			//do the draw call that renders the mesh into the screen
 			mesh->render(GL_TRIANGLES);
 		}
+		glDepthFunc(GL_LESS); //as default
 	}
 	else if (multiple_lights == 2)
 	{
-		Vector3 light_position[5];
-		Vector3 light_color[5];
-		float light_intensity[5];
+		Vector3 light_position[10];
+		Vector3 light_color[10];
+		Vector3 light_vector[10];
+		int light_type[10];
+		float light_intensity[10];
+		Vector2 light_spot_vars[10];	// x = cut off	y = spot exponent
 
 		for (int i = 0; i < lights.size(); i++)
 		{
 			light_position[i] = lights[i]->model.getTranslation();
 			light_color[i] = lights[i]->color;
 			light_intensity[i] = lights[i]->intensity;
+			light_type[i] = (int)lights[i]->light_type;
+			light_vector[i] = lights[i]->model.frontVector();//lights[i]->directional_vector;
+			light_spot_vars[i] = Vector2( cos((lights[i]->cone_angle / 180.0) * PI), lights[i]->spot_exponent);
 		}
+		int num_lights = lights.size();
 
-		shader->setUniform3Array("u_light_pos", (float*)&light_position, 3);
-		shader->setUniform3Array("u_light_color", (float*)&light_color, 3);
-		shader->setUniform3Array("u_light_intensity", (float*)&light_intensity, 3);
-		shader->setUniform("u_num_lights", 3);
+		shader->setUniform3Array("u_light_pos", (float*)&light_position, num_lights);
+		shader->setUniform3Array("u_light_color", (float*)&light_color, num_lights);
+		shader->setUniform3Array("u_light_vector", (float*)&light_vector, num_lights);
+		shader->setUniform1Array("u_light_type", (int*)&light_type, num_lights);
+		shader->setUniform1Array("u_light_intensity", (float*)&light_intensity, num_lights);
+		shader->setUniform2Array("u_light_spot_vars", (float*)&light_spot_vars, num_lights);
+		shader->setUniform("u_num_lights", num_lights);
 
 		mesh->render(GL_TRIANGLES);
 	}

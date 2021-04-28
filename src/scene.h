@@ -68,7 +68,6 @@ namespace GTR {
 		float max_distance;	//how far the light can reach
 		float cone_angle;	//angle in degrees of the conce spotlight
 		float area_size;	//size of the volume for directional light
-		float spot_cosine_cutoff;
 		float spot_exponent;
 		Vector3 directional_vector;
 		eLightType light_type;
