@@ -1,5 +1,6 @@
 #pragma once
 #include "prefab.h"
+#include "fbo.h"
 
 //forward declarations
 class Camera;
@@ -47,7 +48,9 @@ namespace GTR {
 
 	public:
 
-		//add here your functions
+		FBO fbo;
+		Texture* color_buffer;
+		void renderToFBO(GTR::Scene* scene, Camera* camera);
 		bool isRenderingBoundingBox = false;
 		eRendererCondition renderer_cond = eRendererCondition::REND_COND_NONE;
 		std::vector< renderCall > render_calls;		// store nodes 

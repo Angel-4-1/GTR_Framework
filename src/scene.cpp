@@ -240,10 +240,11 @@ void GTR::LightEntity::configure(cJSON* json)
 		spot_exponent = cJSON_GetObjectItem(json, "spot_exponent")->valuedouble;
 	}
 	
-	if (cJSON_GetObjectItem(json, "direction"))
+	if (cJSON_GetObjectItem(json, "target"))
 	{
-		directional_vector = readJSONVector3(json, "direction", Vector3());
-		model.setFrontAndOrthonormalize(directional_vector);
+		target = readJSONVector3(json, "target", Vector3());
+		Vector3 front = target - model.getTranslation();
+		model.setFrontAndOrthonormalize(front);
 	}
 }
 
@@ -255,7 +256,7 @@ void GTR::LightEntity::renderInMenu()
 	ImGui::Combo("Light Type", (int*)&light_type, "DIRECTIONAL\0SPOT\0POINT", 3);
 	ImGui::ColorEdit3("Color", color.v);
 	ImGui::SliderFloat("Intensity", &intensity, 0, 10);
-	changed |= ImGui::SliderFloat3("Direction", &directional_vector.x, -10, 10);
+	changed |= ImGui::SliderFloat3("Target Position", &target.x, -1000, 1000);
 	ImGui::SliderFloat("Max distance", &max_distance, 0, 5000);
 	ImGui::SliderFloat("Area size", &area_size, 0, 1000);
 	if (light_type == SPOT)
@@ -264,7 +265,10 @@ void GTR::LightEntity::renderInMenu()
 		ImGui::SliderFloat("Spot exponent", &spot_exponent, 0, 100);
 	}
 	
-	if(changed)
-		model.setFrontAndOrthonormalize(directional_vector);
+	if (changed)
+	{
+		Vector3 front = target - model.getTranslation();
+		model.setFrontAndOrthonormalize(front);
+	}
 #endif
 }
