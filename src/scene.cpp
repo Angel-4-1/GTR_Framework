@@ -2,6 +2,7 @@
 #include "utils.h"
 
 #include "prefab.h"
+#include "application.h"
 #include "extra/cJSON.h"
 
 GTR::Scene* GTR::Scene::instance = NULL;
@@ -25,6 +26,11 @@ void GTR::Scene::clear()
 void GTR::Scene::addEntity(BaseEntity* entity)
 {
 	entities.push_back(entity); entity->scene = this;
+
+	if (entity->entity_type == LIGHT)
+	{
+		lights.push_back((GTR::LightEntity*)entity);
+	}
 }
 
 bool GTR::Scene::load(const char* filename)
@@ -172,6 +178,10 @@ GTR::LightEntity::LightEntity()
 	cone_angle = 45;
 	area_size = 0;
 	spot_exponent = 1;
+	camera = new Camera();
+	shadow_fbo = new FBO();
+	shadow_fbo->setDepthOnly(1024, 1024);
+	shadow_bias = 0.001;
 }
 
 void GTR::LightEntity::uploadToShader(Shader* shader)
@@ -246,6 +256,8 @@ void GTR::LightEntity::configure(cJSON* json)
 		Vector3 front = target - model.getTranslation();
 		model.setFrontAndOrthonormalize(front);
 	}
+
+	updateCamera();
 }
 
 void GTR::LightEntity::renderInMenu()
@@ -269,6 +281,56 @@ void GTR::LightEntity::renderInMenu()
 	{
 		Vector3 front = target - model.getTranslation();
 		model.setFrontAndOrthonormalize(front);
+		updateCamera();
 	}
 #endif
+}
+
+void GTR::LightEntity::updateCamera() {
+	//light cannot be vertical
+	camera->lookAt(
+		model.getTranslation(),
+		model.getTranslation() + model.frontVector(),
+		Vector3(0, 1.001, 0));
+
+	switch (light_type)
+	{
+	case SPOT:
+		camera->setPerspective(2 * cone_angle, Application::instance->window_width / (float)Application::instance->window_height, 1.0f, max_distance);
+		break;
+	case DIRECTIONAL:
+		camera->setOrthographic(-500, 500, -500, 500, 1.0f, max_distance);
+		break;
+	case POINT:
+		camera->setPerspective(90.0f, Application::instance->window_width / (float)Application::instance->window_height, 1.0f, max_distance);
+		break;
+	}
+	
+}
+
+void GTR::LightEntity::renderShadowFBO(Shader* shader)
+{
+	float w = Application::instance->window_width;
+	float h = Application::instance->window_height;
+
+	glViewport(w - (w / 3), h - (h / 3), w / 3, h / 3);
+	glScissor(w - (w / 3), h - (h / 3), w / 3, h / 3);
+	glEnable(GL_SCISSOR_TEST);
+
+	shader->enable();
+	//remember to disable ztest if rendering quads!
+	glDisable(GL_DEPTH_TEST);
+
+	//upload uniforms
+	shader->setUniform("u_camera_nearfar", Vector2(camera->near_plane, camera->far_plane));
+
+	shadow_fbo->depth_texture->toViewport(shader);
+
+	glEnable(GL_DEPTH_TEST);
+
+	shader->disable();
+
+	//restore viewport
+	glDisable(GL_SCISSOR_TEST);
+	glViewport(0, 0, w, h);
 }

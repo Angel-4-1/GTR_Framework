@@ -25,7 +25,8 @@ namespace GTR {
 		SHOW_OCCLUSION = 5,
 		SHOW_METALLIC  = 6,
 		SHOW_ROUGHNESS = 7,
-		SHOW_SINGLEPASS = 8
+		SHOW_SINGLEPASS = 8,
+		SHOW_SHADOWMAP = 9
 	};
 
 	class renderCall {
@@ -50,17 +51,22 @@ namespace GTR {
 
 		FBO fbo;
 		Texture* color_buffer;
+		bool rendering_shadowmap = false;
+		bool show_depth_camera = true;
 		void renderToFBO(GTR::Scene* scene, Camera* camera);
 		bool isRenderingBoundingBox = false;
-		eRendererCondition renderer_cond = eRendererCondition::REND_COND_NONE;
-		std::vector< renderCall > render_calls;		// store nodes 
+		eRendererCondition renderer_cond;
+		std::vector< renderCall > render_calls;
 		void createRenderCalls(GTR::Scene* scene, Camera* camera);
 		void checkAlphaComponent(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
 		void renderInMenu();
 		void renderSingleNode(const Matrix44& prefab_model, GTR::Node* node, Camera* camera, bool hasAlpha);
 		void renderRenderCalls(std::vector< renderCall > data, Camera* camera);
 		float computeDistanceToCamera(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
+		void renderMultiPass(Shader* shader, Mesh* mesh);
+		void renderSinglePass(Shader* shader, Mesh* mesh);
 		std::vector<LightEntity*> lights;
+		int light_camera;
 		
 		Renderer();
 		eRenderMode render_mode;

@@ -76,3 +76,59 @@ void Material::renderInMenu()
 	}
 #endif
 }
+
+void GTR::Material::uploadToShader(Shader* shader)
+{
+	//Color
+	shader->setUniform("u_color", color);
+
+	//Color texture
+	Texture* texture = NULL;
+	texture = color_texture.texture;
+	if (texture == NULL)
+		texture = Texture::getWhiteTexture(); //a 1x1 white texture
+
+	if (texture)
+		shader->setUniform("u_texture", texture, 0);
+
+	//Emissive Texture
+	Texture* emissive_text = NULL;
+	emissive_text = emissive_texture.texture;
+
+	if (emissive_text) {
+		shader->setUniform("u_is_emissor", true);
+		shader->setUniform("u_emissive_factor", emissive_factor);
+		shader->setUniform("u_emissive_texture", emissive_text, 1);
+	}
+	else {
+		shader->setUniform("u_is_emissor", false);
+	}
+
+	//Normal texture
+	Texture* normal_text = NULL;
+	normal_text = normal_texture.texture;
+
+	if (normal_text) {
+		shader->setUniform("u_has_normal", true);
+		shader->setUniform("u_normal_texture", normal_text, 2);
+	}
+	else {
+		shader->setUniform("u_has_normal", false);
+	}
+
+	//Metallic roughness texture
+	Texture* metallic_roughness_text = NULL;
+	metallic_roughness_text = metallic_roughness_texture.texture;
+	if (metallic_roughness_text) {
+		shader->setUniform("u_has_metallic_roughness", true);
+		shader->setUniform("u_metallic_roughness_texture", metallic_roughness_text, 3);
+		shader->setUniform("u_material_shininess", roughness_factor);
+		int type_property = 0;
+	} 
+	else {
+		shader->setUniform("u_has_metallic_roughness", false);
+	}
+
+	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
+	shader->setUniform("u_alpha_cutoff", alpha_mode == GTR::eAlphaMode::MASK ? alpha_cutoff : 0);
+}

@@ -3,6 +3,8 @@
 
 #include "framework.h"
 #include "shader.h"
+#include "fbo.h"
+#include "camera.h"
 #include <string>
 
 //forward declaration
@@ -72,10 +74,17 @@ namespace GTR {
 		Vector3 target;
 		eLightType light_type;
 
+		//For shadows
+		Camera* camera;
+		FBO* shadow_fbo;
+		float shadow_bias;
+
 		LightEntity();
 		void uploadToShader(Shader* shader);
 		virtual void renderInMenu();
 		virtual void configure(cJSON* json);
+		void updateCamera();
+		void renderShadowFBO(Shader* shader);
 	};
 
 	//contains all entities of the scene
@@ -91,6 +100,7 @@ namespace GTR {
 
 		std::string filename;
 		std::vector<BaseEntity*> entities;
+		std::vector<LightEntity*> lights;
 
 		void clear();
 		void addEntity(BaseEntity* entity);

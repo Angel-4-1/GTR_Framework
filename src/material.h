@@ -1,6 +1,7 @@
 #pragma once
 
 #include "framework.h"
+#include "shader.h"
 #include <cassert>
 #include <map>
 #include <string>
@@ -74,5 +75,7 @@ namespace GTR {
 		static void Release();
 
 		void renderInMenu();
+
+		void uploadToShader(Shader* shader);
 	};
 };

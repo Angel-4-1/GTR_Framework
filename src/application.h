@@ -27,6 +27,7 @@ public:
 	bool must_exit;
 	bool render_debug;
 	bool render_gui;
+	bool render_grid;
 
 	//some vars
 	bool mouse_locked; //tells if the mouse is locked (blocked in the center and not visible)

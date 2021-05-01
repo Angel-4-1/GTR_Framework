@@ -36,6 +36,7 @@ Application::Application(int window_width, int window_height, SDL_Window* window
 	must_exit = false;
 	render_debug = true;
 	render_gui = true;
+	render_grid = false;
 
 	render_wireframe = false;
 
@@ -99,10 +100,11 @@ void Application::render(void)
 	//Matrix44 model;
 	//renderer->renderPrefab( model, prefab, camera );
 
-	renderer->renderScene(scene, camera);
+	//renderer->renderScene(scene, camera);
+	renderer->renderToFBO(scene, camera);
 
 	//Draw the floor grid, helpful to have a reference point
-	if (render_debug)
+	if (render_debug && render_grid)
 		drawGrid();
 
 	glDisable(GL_DEPTH_TEST);
@@ -241,6 +243,7 @@ void Application::renderDebugGUI(void)
 	ImGui::Text(getGPUStats().c_str());					   // Display some text (you can use a format strings too)
 
 	ImGui::Checkbox("Wireframe", &render_wireframe);
+	ImGui::Checkbox("Grid", &render_grid);
 	ImGui::ColorEdit4("BG color", scene->background_color.v);
 	ImGui::ColorEdit4("Ambient light", scene->ambient_light.v);
 

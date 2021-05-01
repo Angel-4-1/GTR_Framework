@@ -74,7 +74,7 @@
       "name": "gmc_right_spot",
       "type": "LIGHT",
       "category": "SPOT",
-      "position": [ 8.625, 40.440, -57.246 ],
+      "position": [ 9, 40.440, -54.6 ],
       "color": [ 0.0, 0.0, 1.0 ],
       "intensity": 1,
       "max_distance": 1000,
