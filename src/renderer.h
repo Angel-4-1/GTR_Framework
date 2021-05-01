@@ -65,6 +65,7 @@ namespace GTR {
 		float computeDistanceToCamera(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
 		void renderMultiPass(Shader* shader, Mesh* mesh);
 		void renderSinglePass(Shader* shader, Mesh* mesh);
+		void renderLights(Camera* camera);
 		std::vector<LightEntity*> lights;
 		int light_camera;
 		

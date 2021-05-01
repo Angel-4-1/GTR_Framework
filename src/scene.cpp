@@ -182,6 +182,9 @@ GTR::LightEntity::LightEntity()
 	shadow_fbo = new FBO();
 	shadow_fbo->setDepthOnly(1024, 1024);
 	shadow_bias = 0.001;
+	mesh = new Mesh();
+	mesh->createPlane(50);
+	render_light = false;
 }
 
 void GTR::LightEntity::uploadToShader(Shader* shader)
@@ -205,12 +208,16 @@ void GTR::LightEntity::configure(cJSON* json)
 	{
 		std::string category = cJSON_GetObjectItem(json, "category")->valuestring;
 		
-		if (category == "POINT")
+		if (category == "POINT") {
 			light_type = POINT;
-		else if ( category == "SPOT")
+		}
+		else if (category == "SPOT") {
 			light_type = SPOT;
-		else if (category == "DIRECTIONAL")
+			//mesh->Get("data/cone.obj", true, false);
+		}
+		else if (category == "DIRECTIONAL") {
 			light_type = DIRECTIONAL;
+		}
 	}
 
 	if (cJSON_GetObjectItem(json, "color"))
@@ -265,18 +272,23 @@ void GTR::LightEntity::renderInMenu()
 #ifndef SKIP_IMGUI
 	bool changed = false;
 	ImGuiMatrix44(model, "Model");
+	if (light_type == DIRECTIONAL)
+	{
+		ImGui::Checkbox("Render", &render_light);
+	}
 	ImGui::Combo("Light Type", (int*)&light_type, "DIRECTIONAL\0SPOT\0POINT", 3);
 	ImGui::ColorEdit3("Color", color.v);
 	ImGui::SliderFloat("Intensity", &intensity, 0, 10);
 	changed |= ImGui::SliderFloat3("Target Position", &target.x, -1000, 1000);
 	ImGui::SliderFloat("Max distance", &max_distance, 0, 5000);
 	ImGui::SliderFloat("Area size", &area_size, 0, 1000);
+	ImGui::SliderFloat("Shadow Bias", &shadow_bias, 0, 0.05);
 	if (light_type == SPOT)
 	{
-		ImGui::SliderFloat("Cone angle", &cone_angle, 0, 90);
+		ImGui::SliderFloat("Cone angle", &cone_angle, 0, 89);
 		ImGui::SliderFloat("Spot exponent", &spot_exponent, 0, 100);
 	}
-	
+
 	if (changed)
 	{
 		Vector3 front = target - model.getTranslation();
@@ -296,6 +308,7 @@ void GTR::LightEntity::updateCamera() {
 	switch (light_type)
 	{
 	case SPOT:
+		//camera->setPerspective(cone_angle, Application::instance->window_width / (float)Application::instance->window_height, 1.0f, max_distance);
 		camera->setPerspective(2 * cone_angle, Application::instance->window_width / (float)Application::instance->window_height, 1.0f, max_distance);
 		break;
 	case DIRECTIONAL:
@@ -333,4 +346,18 @@ void GTR::LightEntity::renderShadowFBO(Shader* shader)
 	//restore viewport
 	glDisable(GL_SCISSOR_TEST);
 	glViewport(0, 0, w, h);
+}
+
+void GTR::LightEntity::renderLight(Camera* camera)
+{
+	Shader* basic_shader = Shader::getDefaultShader("flat");
+	basic_shader->enable();
+	glDisable(GL_DEPTH_TEST);
+	basic_shader->setUniform("u_color", Vector4(1.0, 1.0, 1.0, 1.0));
+	basic_shader->setUniform("u_model", model);
+	basic_shader->setUniform("u_camera_position", camera->eye);
+	basic_shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	mesh->render(GL_TRIANGLES);
+	glEnable(GL_DEPTH_TEST);
+	basic_shader->disable();
 }

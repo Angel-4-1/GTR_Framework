@@ -36,8 +36,8 @@ void Renderer::renderToFBO(GTR::Scene* scene, Camera* camera)
 		glColorMask(false, false, false, false);
 		//clear the depth buffer only (don't care of color)
 		glClear(GL_DEPTH_BUFFER_BIT);
-		lights[light_camera]->camera->enable();
 		lights[light_camera]->updateCamera();
+		lights[light_camera]->camera->enable();
 		renderScene(scene, lights[light_camera]->camera);
 		//disable it to render back to the screen
 		lights[light_camera]->shadow_fbo->unbind();
@@ -92,6 +92,8 @@ void Renderer::renderToFBO(GTR::Scene* scene, Camera* camera)
 	else {
 		renderScene(scene, camera);
 	}
+
+	renderLights(camera);
 }
 
 void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
@@ -405,7 +407,19 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 			}
 		}
 		else {
+			shader->setUniform("u_cast_shadow", true);
 			lights[light_camera]->uploadToShader(shader);
+			//get the depth texture from the FBO
+			Texture* shadowmap = lights[light_camera]->shadow_fbo->depth_texture;
+			//pass it to the shader in slot 8
+			shader->setTexture("u_shadowmap_texture", shadowmap, 8);
+			//also get the viewprojection from the light
+			Matrix44 shadow_proj = lights[light_camera]->camera->viewprojection_matrix;
+			//pass it to the shader
+			shader->setUniform("u_shadow_viewproj", shadow_proj);
+			//we will also need the shadow bias
+			shader->setUniform("u_shadow_bias", lights[light_camera]->shadow_bias);
+
 			mesh->render(GL_TRIANGLES);
 		}
 	}
@@ -490,6 +504,15 @@ void GTR::Renderer::renderSinglePass(Shader* shader, Mesh* mesh)
 	shader->setUniform("u_num_lights", num_lights);
 
 	mesh->render(GL_TRIANGLES);
+}
+
+void GTR::Renderer::renderLights(Camera* camera)
+{
+	for (int i = 0; i < lights.size(); i++)
+	{
+		if (lights[i]->render_light)
+			lights[i]->renderLight(camera);
+	}
 }
 
 void Renderer::renderInMenu()

@@ -194,6 +194,59 @@ vec3 computeLight( int light_type, vec3 light_pos, vec3 world_pos, vec3 light_ve
 	return L;
 }
 
+float computeShadowFactor(vec3 pos, mat4 u_shadow_viewproj, float u_shadow_bias, sampler2D shadowmap, int u_light_type )
+{
+	//project our 3D position to the shadowmap
+	vec4 proj_pos = u_shadow_viewproj * vec4(pos,1.0);
+
+	//from homogeneus space to clip space
+	vec2 shadow_uv = proj_pos.xy / proj_pos.w;
+
+	//from clip space to uv space
+	shadow_uv = shadow_uv * 0.5 + vec2(0.5);
+
+	//get point depth [-1 .. +1] in non-linear space
+	float real_depth = (proj_pos.z - u_shadow_bias) / proj_pos.w;
+
+	//normalize from [-1..+1] to [0..+1] still non-linear
+	real_depth = real_depth * 0.5 + 0.5;
+
+	//read depth from depth buffer in [0..+1] non-linear
+	float shadow_depth = texture( shadowmap, shadow_uv).x;
+
+	//compute final shadow factor by comparing
+	float shadow_factor = 1.0;
+
+	//we can compare them, even if they are not linear
+	if( shadow_depth < real_depth )
+		shadow_factor = 0.0;
+
+	//for directional lights
+	if ( u_light_type == 0 )
+	{
+		//if it is outside on the sides
+		if( shadow_uv.x < 0.0 || shadow_uv.x > 1.0 || shadow_uv.y < 0.0 || shadow_uv.y > 1.0 )
+			return 1.0;
+
+		//it is before near or behind far plane
+		if(real_depth < 0.0 || real_depth > 1.0)
+			return 1.0;
+	}
+	else 
+	{
+		//for spot and point
+		//if it is outside on the sides
+		if( shadow_uv.x < 0.0 || shadow_uv.x > 1.0 || shadow_uv.y < 0.0 || shadow_uv.y > 1.0 )
+			return 0.0;
+
+		//it is before near or behind far plane
+		if(real_depth < 0.0 || real_depth > 1.0)
+			return 0.0;
+	}
+
+	return shadow_factor;
+}
+
 \light.fs
 
 #version 330 core
@@ -209,6 +262,7 @@ uniform sampler2D u_texture;
 uniform sampler2D u_normal_texture;
 uniform sampler2D u_emissive_texture;
 uniform sampler2D u_metallic_roughness_texture;
+uniform sampler2D u_shadowmap_texture;
 
 uniform float u_time;
 uniform float u_alpha_cutoff;
@@ -227,6 +281,9 @@ uniform bool u_has_normal;
 uniform float u_spot_cosine_cutoff;
 uniform float u_spot_exponent;
 uniform float u_light_max_distance;
+uniform bool u_cast_shadow;
+uniform mat4 u_shadow_viewproj;
+uniform float u_shadow_bias;
 
 out vec4 FragColor;
 
@@ -275,11 +332,11 @@ void main()
 	vec3 sublight = vec3(0.0);
 	sublight += ( NdotL * u_light_color) * att_factor;
 	sublight *= u_light_intensity * occlusion;
-	light += sublight;
+	//light += sublight;
 
 	//apply the light to the pixel color 
 	vec4 final_color = color;
-	final_color.xyz *= light;
+	
 
 	if (u_is_emissor) 
 	{
@@ -288,6 +345,14 @@ void main()
 		final_color.xyz += emissive.xyz;
 	}
 
+	if (u_cast_shadow)
+	{
+		float shadow_factor = computeShadowFactor(v_world_position, u_shadow_viewproj, u_shadow_bias, u_shadowmap_texture, u_light_type );
+		sublight *= shadow_factor;
+
+	}
+	light += sublight;
+	final_color.xyz *= light;
 	FragColor = final_color;
 }
 

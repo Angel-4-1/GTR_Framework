@@ -5,6 +5,7 @@
 #include "shader.h"
 #include "fbo.h"
 #include "camera.h"
+#include "mesh.h"
 #include <string>
 
 //forward declaration
@@ -79,12 +80,17 @@ namespace GTR {
 		FBO* shadow_fbo;
 		float shadow_bias;
 
+		//Render
+		Mesh* mesh;
+		bool render_light;
+
 		LightEntity();
 		void uploadToShader(Shader* shader);
 		virtual void renderInMenu();
 		virtual void configure(cJSON* json);
 		void updateCamera();
 		void renderShadowFBO(Shader* shader);
+		void renderLight(Camera* camera);
 	};
 
 	//contains all entities of the scene
