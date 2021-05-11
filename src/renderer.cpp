@@ -30,7 +30,7 @@ Renderer::Renderer() {
 
 void Renderer::renderToFBO(GTR::Scene* scene, Camera* camera)
 {
-	if (render_mode == SHOW_SHADOWMAP)
+	if (render_mode == SHOW_SHADOWMAP && pipeline_mode == FORWARD)
 	{
 		//create the shadow maps for each light
 		createShadowMaps(scene,camera);
@@ -204,7 +204,10 @@ void Renderer::renderForward(GTR::Scene* scene, std::vector< renderCall >& data,
 	for (int i = 0; i < data.size(); i++)
 	{
 		renderCall& rc = data[i];
-		renderMeshWithMaterial(rc.model, rc.mesh, rc.material, camera);
+		if ( (renderer_cond == REND_COND_NO_ALPHA && !rc.isAlpha) || renderer_cond == REND_COND_NONE)
+			renderMeshWithMaterial(rc.model, rc.mesh, rc.material, camera);
+		else if (renderer_cond == REND_COND_ALPHA && rc.isAlpha)
+			renderMeshWithMaterial(rc.model, rc.mesh, rc.material, camera);
 	}
 }
 
@@ -213,16 +216,16 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 	//create buffers
 	if (gbuffers_fbo.fbo_id == 0)
 	{
-		//careful when resinig the window
+		//careful when resizing the window
 		gbuffers_fbo.create(Application::instance->window_width, 
 							Application::instance->window_height,
 							3,	//num textures
 							GL_RGBA,
-							GL_UNSIGNED_BYTE);
+							GL_FLOAT);	//precision
 	}
 
 	gbuffers_fbo.bind();
-	glClearColor(0, 0, 0, 1.0);
+	glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	checkGLErrors();
@@ -235,31 +238,76 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 
 	gbuffers_fbo.unbind();
 	
+	glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glDisable(GL_BLEND);
+	glDisable(GL_DEPTH_TEST);
+
+	if (show_gbuffers)
+	{
+		renderGBuffers(camera);
+	}
+	else {
+		renderReconstructedScene(scene, camera);
+	}
+	
+}
+
+//show each one of the 4 textures stored at gbuffers_fbo
+void Renderer::renderGBuffers(Camera* camera)
+{
+	int w = Application::instance->window_width;
+	int h = Application::instance->window_height;
+	glViewport(0, h * 0.5, w * 0.5, h * 0.5);
 	gbuffers_fbo.color_textures[0]->toViewport();
 
-	/*if (show_gbuffers)
+	glViewport(w * 0.5, h * 0.5, w * 0.5, h * 0.5);
+	gbuffers_fbo.color_textures[1]->toViewport();
+
+	glViewport(0, 0, w * 0.5, h * 0.5);
+	gbuffers_fbo.color_textures[2]->toViewport();
+
+	Shader* depth_shader = Shader::Get("depth");
+	depth_shader->enable();
+	depth_shader->setUniform("u_camera_nearfar", Vector2(camera->near_plane, camera->far_plane));
+	glViewport(w * 0.5, 0, w * 0.5, h * 0.5);
+	gbuffers_fbo.depth_texture->toViewport(depth_shader);
+	depth_shader->disable();
+
+	glViewport(0, 0, w, h);
+}
+
+void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
+{
+	Mesh* quad = Mesh::getQuad();
+	Shader* shader = Shader::Get("deferred");
+	shader->enable();
+	shader->setTexture("u_color_texture", gbuffers_fbo.color_textures[0], 0);
+	shader->setTexture("u_normal_texture", gbuffers_fbo.color_textures[1], 1);
+	shader->setTexture("u_extra_texture", gbuffers_fbo.color_textures[2], 2);
+	shader->setTexture("u_depth_texture", gbuffers_fbo.depth_texture, 3);
+	shader->setUniform("u_ambient_light", scene->ambient_light);
+
+	Matrix44 inv_viewproj = camera->viewprojection_matrix;
+	inv_viewproj.inverse();
+	shader->setUniform("u_inverse_viewprojection", inv_viewproj);
+
+	//Multipass
+	for (int i = 0; i < lights.size(); i++)
 	{
-		int w = Application::instance->window_width;
-		int h = Application::instance->window_height;
-		glViewport(0, h * 0.5, w * 0.5, h * 0.5);
-		gbuffers_fbo.color_textures[0]->toViewport();
+		LightEntity* light = lights[i];
+		//check if light is inside the camera frustum
+		int inside = (int)camera->testSphereInFrustum(light->model.getTranslation(), light->max_distance);
+		if (inside == 0)
+			continue;
 
-		glViewport(w * 0.5, h * 0.5, w * 0.5, h * 0.5);
-		gbuffers_fbo.color_textures[1]->toViewport();
-
-		glViewport(0, 0, w * 0.5, h * 0.5);
-		gbuffers_fbo.color_textures[2]->toViewport();
-
-		Shader* depth_shader = Shader::Get("depth");
-		depth_shader->enable();
-		depth_shader->setUniform("u_camera_nearfar", Vector2(camera->near_plane, camera->far_plane));
-		glViewport(w * 0.5, 0, w * 0.5, h * 0.5);
-		gbuffers_fbo.depth_texture->toViewport(depth_shader);
-		depth_shader->disable();
-
-		glViewport(0, 0, w, h);
-	}*/
-	
+		light->uploadToShader(shader);
+		quad->render(GL_TRIANGLES);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE);
+	}
+	glDisable(GL_BLEND);
+	shader->disable();
 }
 
 //renders a mesh given its transform and material
@@ -326,32 +374,40 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	//upload material properties to the shader
 	material->uploadToShader(shader);
 
-	if (render_mode == SHOW_MULTIPASS) 
+	if (pipeline_mode == FORWARD)
 	{
-		//Multi Pass
-		renderMultiPass(shader, mesh);
-	}
-	else if (render_mode == SHOW_SINGLEPASS)
-	{
-		//Single Pass
-		renderSinglePass(shader, mesh);
-	}
-	else if (render_mode == SHOW_SHADOWMAP) {
-		//Lights with shadows
-		if (rendering_shadowmap) {
-			//do not care about objects with transparency when creating the shadowmap
-			if (material->alpha_mode != GTR::eAlphaMode::BLEND) {
-				mesh->render(GL_TRIANGLES);
+		if (render_mode == SHOW_MULTIPASS)
+		{
+			//Multi Pass
+			renderMultiPass(shader, mesh);
+		}
+		else if (render_mode == SHOW_SINGLEPASS)
+		{
+			//Single Pass
+			renderSinglePass(shader, mesh);
+		}
+		else if (render_mode == SHOW_SHADOWMAP) {
+			//Lights with shadows
+			if (rendering_shadowmap) {
+				//do not care about objects with transparency when creating the shadowmap
+				if (material->alpha_mode != GTR::eAlphaMode::BLEND) {
+					mesh->render(GL_TRIANGLES);
+				}
+			}
+			else {
+				//Multi pass with shadows
+				renderMultiPass(shader, mesh, true);
 			}
 		}
-		else {
-			//Multi pass with shadows
-			renderMultiPass(shader, mesh, true);
+		else {	//no lights
+			mesh->render(GL_TRIANGLES);
 		}
 	}
-	else {	//no lights
+	//Deferred
+	else {
 		mesh->render(GL_TRIANGLES);
 	}
+	
 	
 	//disable shader
 	shader->disable();
@@ -615,21 +671,24 @@ void Renderer::renderInMenu()
 #ifndef SKIP_IMGUI
 	bool changed_fbo = false;
 	ImGui::Checkbox("BoundingBox", &isRenderingBoundingBox);
-//	ImGui::Combo("Alpha", (int*)&renderer_cond, "NONE\0ALPHA\0NOALPHA", 3);
 	changed_fbo |= ImGui::Combo("Quality", (int*)&quality, "LOW\0MEDIUM\0HIGH\0ULTRA", 4);
-	ImGui::Combo("Render Mode", (int*)&render_mode, "MULTIPASS\0TEXTURE\0NORMAL\0NORMALMAP\0UVS\0OCCLUSION\0METALLIC\0ROUGHNESS\0SINGLEPASS\0SHADOWMAP", 7);
-//	ImGui::Combo("Pipline Mode", (int*)&pipeline_mode, "FORWARD\0DEFERRED", 2);
+	ImGui::Combo("Pipeline Mode", (int*)&pipeline_mode, "FORWARD\0DEFERRED", 2);
 	
+	if (pipeline_mode == FORWARD)
+	{
+		ImGui::Combo("Elements", (int*)&renderer_cond, "ALL\0TRANSLUCENTS\0SOLIDS");
+		ImGui::Combo("Render Mode", (int*)&render_mode, "MULTIPASS\0TEXTURE\0NORMAL\0NORMALMAP\0UVS\0OCCLUSION\0METALLIC\0ROUGHNESS\0SINGLEPASS\0SHADOWMAP", 7);
+		if (render_mode == SHOW_SHADOWMAP)
+		{
+			ImGui::Checkbox("Show Depth Cameras", &show_depth_camera);
+			ImGui::SliderInt("Depth Light Camera", &light_camera, 0, lights.size() - 1);
+			if(light_camera < lights.size() && light_camera >= 0)
+				ImGui::Text(lights[light_camera]->name.c_str());
+		}
+	}
+
 	if(pipeline_mode == DEFERRED)
 		ImGui::Checkbox("Show GBuffers", &show_gbuffers);
-
-	if (render_mode == SHOW_SHADOWMAP)
-	{
-		ImGui::Checkbox("Show Depth Cameras", &show_depth_camera);
-		ImGui::SliderInt("Depth Light Camera", &light_camera, 0, lights.size() - 1);
-		if(light_camera < lights.size() && light_camera >= 0)
-			ImGui::Text(lights[light_camera]->name.c_str());
-	}
 
 	if (changed_fbo)
 		changeQualityFBO();

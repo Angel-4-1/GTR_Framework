@@ -110,6 +110,21 @@ void main()
 	FragColor = color;
 }
 
+
+\lightParameters
+uniform vec3 u_ambient_light;
+uniform int u_light_type;
+uniform vec3 u_light_position;
+uniform vec3 u_light_vector;
+uniform vec3 u_light_color;
+uniform float u_light_intensity;
+uniform float u_spot_cosine_cutoff;
+uniform float u_spot_exponent;
+uniform float u_light_max_distance;
+uniform float u_shadow_bias;
+uniform bool u_cast_shadow;
+uniform mat4 u_shadow_viewproj;
+
 \lightFunctions
 mat3 cotangent_frame(vec3 N, vec3 p, vec2 uv)
 {
@@ -162,7 +177,7 @@ float computeAttenuationFactor( int light_type, vec3 light_pos, vec3 world_pos, 
 	return max( att_factor, 0.0 );
 }
 
-vec3 computeLight( int light_type, vec3 light_pos, vec3 world_pos, vec3 light_vector, float spot_cosine_cutoff, float spot_exponent )
+vec3 computeLightFromType( int light_type, vec3 light_pos, vec3 world_pos, vec3 light_vector, float spot_cosine_cutoff, float spot_exponent )
 {
 	if ( light_type == 0)	//directional light
 	{
@@ -249,6 +264,29 @@ float computeShadowFactor(vec3 pos, mat4 u_shadow_viewproj, float u_shadow_bias,
 	return shadow_factor;
 }
 
+vec3 computeLight( vec3 N, int light_type, vec3 light_pos, vec3 world_pos, vec3 light_vector, float spot_cosine_cutoff, float spot_exponent, float light_max_distance, float light_intensity, vec3 light_color )
+{
+	vec3 sublight = vec3(0.0);
+
+	//select type of light
+	vec3 L = computeLightFromType( light_type, light_pos, world_pos, light_vector, spot_cosine_cutoff, spot_exponent );
+
+	//compute how much is aligned
+	float NdotL = dot(N,L);
+	NdotL = clamp( NdotL, 0.0, 1.0 );
+
+	//attenuation
+	float att_factor = computeAttenuationFactor(light_type, light_pos, world_pos, light_max_distance);
+
+	//amount of light
+	sublight += ( NdotL * light_color) * att_factor;
+	sublight *= light_intensity;
+	//IMP missing occlusion texture
+	
+	return sublight;
+}
+
+
 \light.fs
 
 #version 330 core
@@ -268,24 +306,14 @@ uniform sampler2D u_shadowmap_texture;
 
 uniform float u_time;
 uniform float u_alpha_cutoff;
-uniform vec3 u_ambient_light;
 uniform vec3 u_camera_position;
 
 uniform bool u_is_emissor;
 uniform bool u_has_metallic_roughness;
-uniform vec3 u_emissive_factor;
-uniform int u_light_type;
-uniform vec3 u_light_position;
-uniform vec3 u_light_vector;
-uniform vec3 u_light_color;
-uniform float u_light_intensity;
 uniform bool u_has_normal;
-uniform float u_spot_cosine_cutoff;
-uniform float u_spot_exponent;
-uniform float u_light_max_distance;
-uniform bool u_cast_shadow;
-uniform mat4 u_shadow_viewproj;
-uniform float u_shadow_bias;
+uniform vec3 u_emissive_factor;
+
+#include "lightParameters"
 
 out vec4 FragColor;
 
@@ -314,16 +342,6 @@ void main()
 		N = normalize( v_normal );
 	}
 
-	//select type of light
-	vec3 L = computeLight( u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent );
-
-	//compute how much is aligned
-	float NdotL = dot(N,L);
-	NdotL = clamp( NdotL, 0.0, 1.0 );
-
-	//attenuation
-	float att_factor = computeAttenuationFactor(u_light_type, u_light_position, v_world_position, u_light_max_distance);
-
 	float occlusion = 1.0;
 	if(u_has_metallic_roughness){
 		float occlusion = texture( u_metallic_roughness_texture, v_uv ).x;
@@ -332,9 +350,8 @@ void main()
 	//amount of light
 	vec3 light = u_ambient_light * occlusion;
 	vec3 sublight = vec3(0.0);
-	sublight += ( NdotL * u_light_color) * att_factor;
-	sublight *= u_light_intensity * occlusion;
-	//light += sublight;
+	sublight += computeLight( N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, u_light_color );
+	sublight *= occlusion;
 
 	//apply the light to the pixel color 
 	vec4 final_color = color;
@@ -445,22 +462,13 @@ void main()
 	{
 		if(i < u_num_lights)
 		{
-			vec3 sub_light = vec3(0.0);
-			vec3 L = computeLight( u_light_type[i], u_light_pos[i], v_world_position, u_light_vector[i], u_light_spot_vars[i].x, u_light_spot_vars[i].y );
+			vec3 sublight = vec3(0.0);
+			sublight += computeLight( N, u_light_type[i], u_light_pos[i], v_world_position, u_light_vector[i], u_light_spot_vars[i].x, u_light_spot_vars[i].y, u_light_max_distance[i], u_light_intensity[i], u_light_color[i] );
+			sublight *= occlusion;
 
-			float NdotL = clamp( dot(L,N), 0.0, 1.0 );
-
-			//attenuation
-			float att_factor = computeAttenuationFactor(u_light_type[i], u_light_pos[i], v_world_position, u_light_max_distance[i]);
-			sub_light += (NdotL * u_light_color[i]) * att_factor;
-			sub_light *= u_light_intensity[i];
-			sub_light *= occlusion;
-
-			light += sub_light;
+			light += sublight;
 		}
 	}
-
-	
 
 	//apply the light to the pixel color 
 	vec4 final_color = color;
@@ -518,10 +526,14 @@ in vec3 v_normal;
 in vec2 v_uv;
 
 uniform vec4 u_color;
-uniform sampler2D u_texture;
 uniform float u_time;
 uniform float u_alpha_cutoff;
 uniform vec2 u_camera_nearfar;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_emissive_texture;
+uniform sampler2D u_metallic_roughness_texture;
+uniform sampler2D u_normal_texture;
 
 layout(location = 0) out vec4 FragColor;
 layout(location = 1) out vec4 NormalColor;
@@ -538,7 +550,7 @@ void main()
 
 	vec3 N = normalize(v_normal);
 
-	//color.a = 1.0;
+	color.a = 1.0;
 	FragColor = color;
 	NormalColor = vec4(N * 0.5 + vec3(0.5),1.0);
 	ExtraColor = vec4(v_world_position, 1.0);
@@ -555,6 +567,11 @@ uniform sampler2D u_normal_texture;
 uniform sampler2D u_extra_texture;
 uniform sampler2D u_depth_texture;
 
+uniform mat4 u_inverse_viewprojection;
+
+#include "lightParameters"
+#include "lightFunctions"
+
 out vec4 FragColor;
 
 void main()
@@ -563,17 +580,31 @@ void main()
 	vec4 albedo = texture( u_color_texture, uv );
 	vec4 normal = texture( u_normal_texture, uv);
 	vec4 extra = texture( u_extra_texture, uv);
-	vec4 depth = texture( u_depth_texture, uv);
+	//vec4 depth = texture( u_depth_texture, uv);
 
 	vec3 N = normalize(normal.xyz * 2.0 - vec3(1.0));
-	vec3 world_position = extra.xyz;
+	//vec3 world_position = extra.xyz;
+	
+	//reconstruct world position from depth and inv. viewproj
+	float depth = texture( u_depth_texture, uv ).x;
+	//convert in range -1 .. 1
+	vec4 screen_pos = vec4(uv.x*2.0-1.0, uv.y*2.0-1.0, depth*2.0-1.0, 1.0);
+	//convert clip space coordinate to world position
+	vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
+	vec3 world_position = proj_worldpos.xyz / proj_worldpos.w;
 
-	vec3 L;
-	//if( u_light_type == 2 ) //POINT
-	//{
-	//	
-	//}
-	FragColor = normal;
+	//amount of light
+	float occlusion = 1.0;
+	vec3 light = u_ambient_light * occlusion;
+	vec3 sublight = vec3(0.0);
+	sublight += computeLight( N, u_light_type, u_light_position, world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, u_light_color );
+	sublight *= occlusion;
+
+	light += sublight;
+	vec3 color = albedo.xyz;
+	color.xyz *= light;
+
+	FragColor = vec4(color,1.0);
 }
 
 
