@@ -57,6 +57,9 @@ bool GTR::Scene::load(const char* filename)
 	//read global properties
 	background_color = readJSONVector3(json, "background_color", background_color);
 	ambient_light = readJSONVector3(json, "ambient_light", ambient_light);
+	main_camera.eye = readJSONVector3(json, "camera_position", main_camera.eye);
+	main_camera.center = readJSONVector3(json, "camera_target", main_camera.center);
+	main_camera.fov = readJSONNumber(json, "camera_fov", main_camera.fov);
 
 	//entities
 	cJSON* entities_json = cJSON_GetObjectItemCaseSensitive(json, "entities");
@@ -181,13 +184,13 @@ GTR::LightEntity::LightEntity()
 	camera = new Camera();
 	shadow_fbo = new FBO();
 	shadow_fbo->setDepthOnly(1024, 1024);
-	shadow_bias = 0.001;
+	shadow_bias = 0.002;
 	mesh = new Mesh();
 	mesh->createPlane(50);
 	render_light = false;
 }
 
-void GTR::LightEntity::uploadToShader(Shader* shader)
+void GTR::LightEntity::uploadToShader(Shader* shader, bool sendShadowMap)
 {
 	shader->setUniform("u_light_position", model.getTranslation());
 	shader->setUniform("u_light_vector", model.frontVector());//directional_vector
@@ -199,21 +202,35 @@ void GTR::LightEntity::uploadToShader(Shader* shader)
 	float cutoff = cos((cone_angle / 180.0) * PI);
 	shader->setUniform("u_spot_cosine_cutoff", cutoff );
 	shader->setUniform("u_spot_exponent", spot_exponent);
+
+	if (shadow_fbo != NULL && cast_shadow && sendShadowMap)
+	{
+		//pass to the shader everything needed to compute shadows
+		shader->setUniform("u_cast_shadow", true);
+		Texture* shadowmap = shadow_fbo->depth_texture;
+		shader->setTexture("u_shadowmap_texture", shadowmap, 8);
+		Matrix44 shadow_proj = camera->viewprojection_matrix;
+		shader->setUniform("u_shadow_viewproj", shadow_proj);
+		shader->setUniform("u_shadow_bias", shadow_bias);
+	}
+	else {
+		//no shadow
+		shader->setUniform("u_cast_shadow", false);
+	}
 }
 
 
 void GTR::LightEntity::configure(cJSON* json)
 {
-	if (cJSON_GetObjectItem(json, "category"))
+	if (cJSON_GetObjectItem(json, "light_type"))
 	{
-		std::string category = cJSON_GetObjectItem(json, "category")->valuestring;
+		std::string category = cJSON_GetObjectItem(json, "light_type")->valuestring;
 		
 		if (category == "POINT") {
 			light_type = POINT;
 		}
 		else if (category == "SPOT") {
 			light_type = SPOT;
-			//mesh->Get("data/cone.obj", true, false);
 		}
 		else if (category == "DIRECTIONAL") {
 			light_type = DIRECTIONAL;
@@ -237,9 +254,9 @@ void GTR::LightEntity::configure(cJSON* json)
 		intensity = cJSON_GetObjectItem(json, "intensity")->valuedouble;
 	}
 
-	if (cJSON_GetObjectItem(json, "max_distance"))
+	if (cJSON_GetObjectItem(json, "max_dist"))
 	{
-		max_distance = cJSON_GetObjectItem(json, "max_distance")->valuedouble;
+		max_distance = cJSON_GetObjectItem(json, "max_dist")->valuedouble;
 	}
 
 	if (cJSON_GetObjectItem(json, "cone_angle"))
@@ -250,11 +267,22 @@ void GTR::LightEntity::configure(cJSON* json)
 	if (cJSON_GetObjectItem(json, "area_size"))
 	{
 		area_size = cJSON_GetObjectItem(json, "area_size")->valuedouble;
+		ortho_cam_size = cJSON_GetObjectItem(json, "area_size")->valuedouble;
 	}
 	
-	if (cJSON_GetObjectItem(json, "spot_exponent"))
+	if (cJSON_GetObjectItem(json, "cone_exp"))
 	{
-		spot_exponent = cJSON_GetObjectItem(json, "spot_exponent")->valuedouble;
+		spot_exponent = cJSON_GetObjectItem(json, "cone_exp")->valuedouble;
+	}
+	
+	if (cJSON_GetObjectItem(json, "cast_shadows"))
+	{
+		cast_shadow = (bool)cJSON_GetObjectItem(json, "cast_shadows")->valueint;
+	}
+
+	if (cJSON_GetObjectItem(json, "shadow_bias"))
+	{
+		shadow_bias = cJSON_GetObjectItem(json, "shadow_bias")->valuedouble;
 	}
 	
 	if (cJSON_GetObjectItem(json, "target"))
@@ -262,9 +290,16 @@ void GTR::LightEntity::configure(cJSON* json)
 		target = readJSONVector3(json, "target", Vector3());
 		Vector3 front = target - model.getTranslation();
 		model.setFrontAndOrthonormalize(front);
+		updateCamera();
 	}
 
-	updateCamera();
+	if (cJSON_GetObjectItem(json, "angle"))
+	{
+		float angle = cJSON_GetObjectItem(json, "angle")->valuedouble;
+		model.rotate(angle * DEG2RAD, Vector3(0, 1, 0));
+		updateCamera();
+	}
+	
 }
 
 void GTR::LightEntity::renderInMenu()
@@ -275,13 +310,14 @@ void GTR::LightEntity::renderInMenu()
 	if (light_type == DIRECTIONAL)
 	{
 		ImGui::Checkbox("Render", &render_light);
+		ImGui::SliderFloat("Area size", &ortho_cam_size, 0, 5000);
 	}
 	ImGui::Combo("Light Type", (int*)&light_type, "DIRECTIONAL\0SPOT\0POINT", 3);
 	ImGui::ColorEdit3("Color", color.v);
 	ImGui::SliderFloat("Intensity", &intensity, 0, 10);
 	changed |= ImGui::SliderFloat3("Target Position", &target.x, -1000, 1000);
 	ImGui::SliderFloat("Max distance", &max_distance, 0, 5000);
-	ImGui::SliderFloat("Area size", &area_size, 0, 1000);
+	ImGui::Checkbox("Cast Shadow", &cast_shadow);
 	ImGui::SliderFloat("Shadow Bias", &shadow_bias, 0, 0.05);
 	if (light_type == SPOT)
 	{
@@ -298,21 +334,24 @@ void GTR::LightEntity::renderInMenu()
 #endif
 }
 
-void GTR::LightEntity::updateCamera() {
-	//light cannot be vertical
+void GTR::LightEntity::updateCamera() 
+{	
 	camera->lookAt(
 		model.getTranslation(),
 		model.getTranslation() + model.frontVector(),
-		Vector3(0, 1.001, 0));
-
+		Vector3(0, 1.001, 0)); //light cannot be vertical
+	
+	float cam_size = 0;
+	
 	switch (light_type)
 	{
 	case SPOT:
-		//camera->setPerspective(cone_angle, Application::instance->window_width / (float)Application::instance->window_height, 1.0f, max_distance);
 		camera->setPerspective(2 * cone_angle, Application::instance->window_width / (float)Application::instance->window_height, 1.0f, max_distance);
 		break;
 	case DIRECTIONAL:
-		camera->setOrthographic(-500, 500, -500, 500, 1.0f, max_distance);
+		cam_size = (float)ortho_cam_size / (float)2.0;
+		camera->setOrthographic(-cam_size, cam_size, -cam_size, cam_size, 1.0f, ortho_cam_size);
+	//	camera->setOrthographic(-ortho_cam_size, ortho_cam_size, -ortho_cam_size, ortho_cam_size, 1.0f, max_distance);
 		break;
 	case POINT:
 		camera->setPerspective(90.0f, Application::instance->window_width / (float)Application::instance->window_height, 1.0f, max_distance);
@@ -321,6 +360,7 @@ void GTR::LightEntity::updateCamera() {
 	
 }
 
+//render shadow fbo on the top right corner of viewport
 void GTR::LightEntity::renderShadowFBO(Shader* shader)
 {
 	float w = Application::instance->window_width;
@@ -331,16 +371,13 @@ void GTR::LightEntity::renderShadowFBO(Shader* shader)
 	glEnable(GL_SCISSOR_TEST);
 
 	shader->enable();
-	//remember to disable ztest if rendering quads!
 	glDisable(GL_DEPTH_TEST);
 
-	//upload uniforms
 	shader->setUniform("u_camera_nearfar", Vector2(camera->near_plane, camera->far_plane));
 
 	shadow_fbo->depth_texture->toViewport(shader);
 
 	glEnable(GL_DEPTH_TEST);
-
 	shader->disable();
 
 	//restore viewport
@@ -348,13 +385,17 @@ void GTR::LightEntity::renderShadowFBO(Shader* shader)
 	glViewport(0, 0, w, h);
 }
 
+//render a basic mesh on the position of the light
 void GTR::LightEntity::renderLight(Camera* camera)
 {
 	Shader* basic_shader = Shader::getDefaultShader("flat");
 	basic_shader->enable();
 	glDisable(GL_DEPTH_TEST);
 	basic_shader->setUniform("u_color", Vector4(1.0, 1.0, 1.0, 1.0));
-	basic_shader->setUniform("u_model", model);
+	//plane mesh was not perfectly aligned
+	Matrix44 m = model;
+	m.rotate(90, Vector3(1, 0, 0));
+	basic_shader->setUniform("u_model", m );
 	basic_shader->setUniform("u_camera_position", camera->eye);
 	basic_shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
 	mesh->render(GL_TRIANGLES);

@@ -1,12 +1,15 @@
 {
-	"background_color":[0.3,0.3,0.3],
-	"ambient_light":[0.3,0.3,0.3],
+  "background_color": [ 0.01, 0.01, 0.1 ],
+  "ambient_light": [ 0.1, 0.1, 0.2 ],
+  "camera_position": [ -300, 90, -150 ],
+  "camera_target": [ 0, 40, 0 ],
+  "camera_fov": 60,
   "entities": [
     {
       "name": "floor",
       "type": "PREFAB",
       "filename": "prefabs/floor.glb",
-      "position": [ 0, -0.1, 0 ]
+      "position": [ 0, 0, 0 ]
     },
     {
       "name": "car1",
@@ -14,6 +17,13 @@
       "filename": "prefabs/gmc/scene.gltf",
       "position": [ -80, 0, -100 ],
       "angle": -45
+    },
+    {
+      "name": "car2",
+      "type": "PREFAB",
+      "filename": "prefabs/gmc/scene.gltf",
+      "position": [ -50, 0, 233 ],
+      "angle": 200
     },
     {
       "name": "house",
@@ -30,58 +40,66 @@
       "scale": [ 0.4, 0.4, 0.4 ]
     },
     {
-      "name": "pontiac",
+      "name": "trash",
       "type": "PREFAB",
-      "filename": "prefabs/pontiac/scene.gltf",
-      "position": [ 30, 3.4, -420 ],
-      "angle": 50
+      "filename": "prefabs/trash_can/scene.gltf",
+      "position": [ 140, 0, 110 ],
+      "scale": [ 0.5, 0.5, 0.5 ]
     },
     {
-      "name": "lampDirectional",
+      "name": "tree",
+      "type": "PREFAB",
+      "filename": "prefabs/tree/scene.gltf",
+      "position": [ 102, 0, 401 ],
+      "angle": -90,
+      "scale": [ 0.8, 0.8, 0.8 ]
+    },
+    {
+      "name": "spot",
       "type": "LIGHT",
-      "category": "DIRECTIONAL",
-      "position": [ 31, 83, -5.5 ],
-      "color": [ 1.0, 1.0, 1.0 ],
-      "intensity": 0.1,
-      "max_distance": 1000,
+      "position": [ 0, 36, -16 ],
+      "angle": -45,
+      "color": [ 1, 0.9, 0.8 ],
+      "intensity": 10,
+      "max_dist": 1000,
       "cone_angle": 45,
-      "target":  [ 0, -1, 0 ]
+      "cone_exp": 60,
+      "light_type": "SPOT",
+      "cast_shadows": true,
+      "shadow_bias": 0.001
     },
     {
-      "name": "lampPoint",
+      "name": "pointlight",
       "type": "LIGHT",
-      "category": "POINT",
-      "position": [ -200, 125, -540 ],
-      "color": [ 1.0, 0.0, 0.0 ],
-      "intensity": 1,
-      "max_distance": 1000,
-      "cone_angle": 45
+      "position": [ -187, 38, -156 ],
+      "angle": 0,
+      "color": [ 1, 0.2, 0.1 ],
+      "intensity": 2.5,
+      "max_dist": 70,
+      "light_type": "POINT"
     },
     {
-      "name": "gmc_left_spot",
+      "name": "pointlight2",
       "type": "LIGHT",
-      "category": "SPOT",
-      "position": [ -32.7, 40.440, -8.672 ],
-      "color": [ 0.0, 1.0, 0.0 ],
-      "intensity": 1,
-      "max_distance": 1000,
-      "cone_angle": 30,
-      "cosine_cutoff": 0.6,
-      "spot_exponent": 1,
-      "target":  [ 66, 40, 90 ]
+      "position": [ -131, 38, -205 ],
+      "angle": 0,
+      "color": [ 1, 0.2, 0.1 ],
+      "intensity": 2.5,
+      "max_dist": 70,
+      "light_type": "POINT"
     },
     {
-      "name": "gmc_right_spot",
+      "name": "moonlight",
       "type": "LIGHT",
-      "category": "SPOT",
-      "position": [ 9, 40.440, -54.6 ],
-      "color": [ 0.0, 0.0, 1.0 ],
-      "intensity": 1,
-      "max_distance": 1000,
-      "cone_angle": 30,
-      "cosine_cutoff": 0.6,
-      "spot_exponent": 1,
-      "target":  [ 66, 40, 10 ]
+      "position": [ 150, 300, 50 ],
+      "target": [ -80, 0, -50 ],
+      "color": [ 0.1, 0.2, 0.4 ],
+      "intensity": 1.5,
+      "area_size": 1500,
+      "max_dist": 1000,
+      "cast_shadows": true,
+      "shadow_bias": 0.002,
+      "light_type": "DIRECTIONAL"
     }
   ]
 }

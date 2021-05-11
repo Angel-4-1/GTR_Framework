@@ -72,6 +72,7 @@ namespace GTR {
 		float cone_angle;	//angle in degrees of the conce spotlight
 		float area_size;	//size of the volume for directional light
 		float spot_exponent;
+		float ortho_cam_size = 500;
 		Vector3 target;
 		eLightType light_type;
 
@@ -79,13 +80,14 @@ namespace GTR {
 		Camera* camera;
 		FBO* shadow_fbo;
 		float shadow_bias;
+		bool cast_shadow = false;
 
 		//Render
 		Mesh* mesh;
 		bool render_light;
 
 		LightEntity();
-		void uploadToShader(Shader* shader);
+		void uploadToShader(Shader* shader, bool sendShadowMap = false);
 		virtual void renderInMenu();
 		virtual void configure(cJSON* json);
 		void updateCamera();
@@ -103,6 +105,7 @@ namespace GTR {
 		Vector3 ambient_light;
 
 		Scene();
+		Camera main_camera;
 
 		std::string filename;
 		std::vector<BaseEntity*> entities;

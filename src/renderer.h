@@ -17,7 +17,7 @@ namespace GTR {
 	};
 
 	enum eRenderMode {
-		SHOW_DEFAULT = 0,
+		SHOW_MULTIPASS = 0,
 		SHOW_TEXTURE = 1,
 		SHOW_NORMAL = 2,
 		SHOW_NORMALMAP = 3,
@@ -26,19 +26,45 @@ namespace GTR {
 		SHOW_METALLIC  = 6,
 		SHOW_ROUGHNESS = 7,
 		SHOW_SINGLEPASS = 8,
-		SHOW_SHADOWMAP = 9
+		SHOW_SHADOWMAP = 9,
+		SHOW_GBUFFERS = 10
+	};
+
+	enum ePipelineMode {
+		FORWARD,
+		DEFERRED
+	};
+
+	enum eQuality {
+		LOW,
+		MEDIUM,
+		HIGH,
+		ULTRA
 	};
 
 	class renderCall {
 	public:
-		Node* node;
+		Mesh* mesh;
+		Material* material;
+		Matrix44 model;
 		float distance_to_camera;
-		Matrix44* prefab_model;
-		bool isAlpha;
+		bool isAlpha;	// has transparency?
 
 		renderCall() {
 			isAlpha = false;
 			distance_to_camera = 9999.0;
+		}
+
+		void set(Mesh* _mesh, Material* _material, Matrix44 _model) {
+			mesh = _mesh;
+			material = _material;
+			model = _model;
+
+			//has transparency?
+			if (material->alpha_mode == GTR::eAlphaMode::BLEND)
+				isAlpha = true;
+			else
+				isAlpha = false;
 		}
 	};
 	
@@ -50,39 +76,63 @@ namespace GTR {
 	public:
 
 		FBO fbo;
+		FBO shadow_singlepass;
+		FBO gbuffers_fbo;
 		Texture* color_buffer;
-		bool rendering_shadowmap = false;
-		bool show_depth_camera = true;
-		void renderToFBO(GTR::Scene* scene, Camera* camera);
-		bool isRenderingBoundingBox = false;
 		eRendererCondition renderer_cond;
-		std::vector< renderCall > render_calls;
-		void createRenderCalls(GTR::Scene* scene, Camera* camera);
-		void checkAlphaComponent(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
-		void renderInMenu();
-		void renderSingleNode(const Matrix44& prefab_model, GTR::Node* node, Camera* camera, bool hasAlpha);
-		void renderRenderCalls(std::vector< renderCall > data, Camera* camera);
-		float computeDistanceToCamera(GTR::Node* node, Matrix44* prefab_model, Vector3 cam_pos);
-		void renderMultiPass(Shader* shader, Mesh* mesh);
-		void renderSinglePass(Shader* shader, Mesh* mesh);
-		void renderLights(Camera* camera);
-		std::vector<LightEntity*> lights;
-		int light_camera;
-		
-		Renderer();
 		eRenderMode render_mode;
+		ePipelineMode pipeline_mode;
+		eQuality quality;
+		std::vector< renderCall > render_calls;
+		std::vector< LightEntity* > lights;
 
+		//some flags
+		bool rendering_shadowmap = false;
+		bool show_depth_camera = false;
+		bool show_gbuffers = false;
+		bool isRenderingBoundingBox = false;
+		int light_camera;	//light to show on depth camera
+
+		float computeDistanceToCamera(Matrix44 node_model, Mesh* mesh, Vector3 cam_pos);
+
+		Renderer();
+		
 		//renders several elements of the scene
 		void renderScene(GTR::Scene* scene, Camera* camera);
+		void renderToFBO(GTR::Scene* scene, Camera* camera);
+
+		//create shadowmaps for each light of the scene
+		void createShadowMaps(Scene* scene, Camera* camera, bool singlepass = false);
+
+		//obtain the shader to use
+		Shader* getShader();
+
+		//create the render calls + sort them 
+		void createRenderCalls(GTR::Scene* scene, Camera* camera);
 	
 		//to render a whole prefab (with all its nodes)
-		void renderPrefab(const Matrix44& model, GTR::Prefab* prefab, Camera* camera);
+		void prefabToNode(const Matrix44& model, GTR::Prefab* prefab, Camera* camera);
 
 		//to render one node from the prefab and its children
-		void renderNode(const Matrix44& model, GTR::Node* node, Camera* camera);
+		void nodeToRenderCall(const Matrix44& model, GTR::Node* node, Camera* camera);
+
+		void renderForward(GTR::Scene* scene, std::vector< renderCall >& data, Camera* camera);
+		void renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data, Camera* camera);
 
 		//to render one mesh given its material and transformation matrix
 		void renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera);
+
+		//how to render with lights
+		void renderMultiPass(Shader* shader, Mesh* mesh, bool sendShadowMap = false);
+		void renderSinglePass(Shader* shader, Mesh* mesh, bool sendShadowMap = false);
+		
+		//show debug menu using IMGUI
+		void renderInMenu();
+
+		//show lights with a basic mesh
+		void renderLights(Camera* camera);
+
+		void changeQualityFBO();
 	};
 
 	Texture* CubemapFromHDRE(const char* filename);
