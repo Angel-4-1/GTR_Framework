@@ -11,6 +11,7 @@ uvs basic.vs uvs.fs
 metallic basic.vs metallic.fs
 gbuffers basic.vs gbuffers.fs
 deferred quad.vs deferred.fs
+deferred_ws basic.vs deferred.fs
 
 \basic.vs
 
@@ -111,7 +112,7 @@ void main()
 }
 
 
-\lightParameters
+\lightUniforms
 uniform vec3 u_ambient_light;
 uniform int u_light_type;
 uniform vec3 u_light_position;
@@ -125,7 +126,7 @@ uniform float u_shadow_bias;
 uniform bool u_cast_shadow;
 uniform mat4 u_shadow_viewproj;
 
-\lightFunctions
+\normalMapping
 mat3 cotangent_frame(vec3 N, vec3 p, vec2 uv)
 {
 	// get edge vectors of the pixel triangle
@@ -155,6 +156,7 @@ vec3 perturbNormal(vec3 N, vec3 WP, vec2 uv, vec3 normal_pixel)
 	return normalize(TBN * normal_pixel);
 }
 
+\lightFunctions
 //compute a linear attenuation factor
 float computeAttenuationFactor( int light_type, vec3 light_pos, vec3 world_pos, float light_max_dist )
 {
@@ -281,11 +283,120 @@ vec3 computeLight( vec3 N, int light_type, vec3 light_pos, vec3 world_pos, vec3 
 	//amount of light
 	sublight += ( NdotL * light_color) * att_factor;
 	sublight *= light_intensity;
-	//IMP missing occlusion texture
 	
 	return sublight;
 }
 
+//Normal Distribution Function using GGX Distribution
+float D_GGX ( float NoH, float linearRoughness )
+{
+	float PI = 3.14159265359;
+	float a2 = linearRoughness * linearRoughness;
+	float f = (NoH * NoH) * (a2 - 1.0) + 1.0;
+	return a2 / (PI * f * f);
+}
+
+//Fresnel term with colorized fresnel
+vec3 F_Schlick( float VoH, vec3 f0)
+{
+	float f = pow(1.0 - VoH, 5.0);
+	return f0 + (vec3(1.0) - f0) * f;
+}
+
+//Geometry visibility
+float GGX(float NdotV, float k){
+	return NdotV / (NdotV * (1.0 - k) + k);
+}
+	
+float G_Smith( float NdotV, float NdotL, float roughness)
+{
+	float k = pow(roughness + 1.0, 2.0) / 8.0;
+	return GGX(NdotL, k) * GGX(NdotV, k);
+}
+
+//cook torrance specular reflection model
+vec3 specularBRDF( float roughness, vec3 f0, float NoH, float NoV, float NoL, float LoH )
+{
+	float a = roughness * roughness;
+
+	// Normal Distribution Function
+	float D = D_GGX( NoH, a );
+
+	// Fresnel Function
+	vec3 F = F_Schlick( LoH, f0 );
+
+	// Visibility Function (shadowing/masking)
+	float G = G_Smith( NoV, NoL, roughness );
+		
+	// Norm factor
+	vec3 spec = D * G * F;
+	spec /= (4.0 * NoL * NoV + 1e-6);
+
+	return spec;
+}
+
+float F_Schlick2(float u, float f0, float f90) {
+    return f0 + (f90 - f0) * pow(1.0 - u, 5.0);
+}
+
+#define RECIPROCAL_PI 0.3183098861837697
+
+// Diffuse Reflections: Disney BRDF using retro-reflections using F term, this is much more complex!!
+float Fd_Burley ( const in float NoV, const in float NoL, const in float LoH, const in float linearRoughness )
+{
+        float f90 = 0.5 + 2.0 * linearRoughness * LoH * LoH;
+        float lightScatter = F_Schlick2( NoL, 1.0, f90 );
+        float viewScatter  = F_Schlick2( NoV, 1.0, f90 );
+        return lightScatter * viewScatter * RECIPROCAL_PI;
+}
+
+vec3 computePBR(vec3 baseColor, float metalness, float roughness, vec3 camera_pos, vec3 N, int light_type, vec3 light_pos, vec3 world_pos, vec3 light_vector, float spot_cosine_cutoff, float spot_exponent, float light_max_distance, float light_intensity, vec3 light_color)
+{
+	vec3 sublight = vec3(0.0);
+
+	//L: vector toward the light
+	vec3 L = computeLightFromType( light_type, light_pos, world_pos, light_vector, spot_cosine_cutoff, spot_exponent );
+
+	//compute how much is aligned
+	float NdotL = clamp( dot(N,L), 0.0, 1.0 );
+
+	//V: vector towards eye
+	vec3 V = normalize(camera_pos - world_pos);
+	float NdotV = clamp( dot(N,V), 0.0, 1.0 );
+	
+	//H: half vector between V and L
+	vec3 H = normalize(V + L);
+	float NdotH = clamp( dot(N,H), 0.0, 1.0 );
+
+	float LdotH = clamp( dot(L,H), 0.0, 1.0 );
+	
+	//compute the reflection (fresnel) based on the color and the metalness
+	vec3 fresnel = mix( vec3(0.5), baseColor.xyz, metalness );
+
+	//compute specular 
+	vec3 specular = specularBRDF( roughness, fresnel, NdotH, NdotV, NdotL, LdotH );
+
+	//metallic materials do not have diffuse
+	vec3 diffuseColor = (1.0 - metalness) * baseColor.xyz;
+
+	//compute diffuse
+	vec3 diffuse = diffuseColor * NdotL;
+	
+	//float linearRoughness = pow(roughness, 2.0);
+	//vec3 diffuse = diffuseColor * Fd_Burley(NdotV, NdotL, LdotH, linearRoughness);
+
+
+	//attenuation
+	float att_factor = computeAttenuationFactor(light_type, light_pos, world_pos, light_max_distance);
+	//shadow factor is missing
+	vec3 properties = light_color * light_intensity * att_factor;
+	
+	//add diffuse + specular
+	vec3 direct = diffuse + specular;
+
+	sublight += direct * properties;
+	return sublight;
+}
 
 \light.fs
 
@@ -313,11 +424,12 @@ uniform bool u_has_metallic_roughness;
 uniform bool u_has_normal;
 uniform vec3 u_emissive_factor;
 
-#include "lightParameters"
+#include "lightUniforms"
 
 out vec4 FragColor;
 
 #include "lightFunctions"
+#include "normalMapping"
 
 void main()
 {
@@ -350,7 +462,19 @@ void main()
 	//amount of light
 	vec3 light = u_ambient_light * occlusion;
 	vec3 sublight = vec3(0.0);
-	sublight += computeLight( N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, u_light_color );
+	if(u_has_metallic_roughness) 
+	{
+		float roughness = texture( u_metallic_roughness_texture, v_uv ).y;
+		float matalness = texture( u_metallic_roughness_texture, v_uv ).z;
+		
+		//PBR
+		sublight += computePBR(color.xyz, matalness, roughness , u_camera_position, N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, u_light_color);
+	//	sublight += computeLight( N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, u_light_color );
+	} else {
+		//Phong
+		sublight += computeLight( N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, u_light_color );
+	}
+
 	sublight *= occlusion;
 
 	//apply the light to the pixel color 
@@ -427,6 +551,7 @@ uniform int u_num_lights;
 out vec4 FragColor;
 
 #include "lightFunctions"
+#include "normalMapping"
 
 void main()
 {
@@ -535,9 +660,14 @@ uniform sampler2D u_emissive_texture;
 uniform sampler2D u_metallic_roughness_texture;
 uniform sampler2D u_normal_texture;
 
+uniform bool u_has_normal;
+uniform bool u_has_metallic_roughness;
+
 layout(location = 0) out vec4 FragColor;
 layout(location = 1) out vec4 NormalColor;
 layout(location = 2) out vec4 ExtraColor;
+
+#include "normalMapping"
 
 void main()
 {
@@ -548,12 +678,28 @@ void main()
 	if(color.a < u_alpha_cutoff)
 		discard;
 
-	vec3 N = normalize(v_normal);
+	//normal
+	vec3 N = vec3(0.0);
+	if (u_has_normal)
+	{
+		vec3 normal_pixel = texture( u_normal_texture, v_uv ).xyz;
+		N = perturbNormal( normalize( v_normal ) , v_world_position, uv, normal_pixel);
+	} else {
+		N = normalize( v_normal );
+	}
+
+	//metallic roughness
+	vec3 metallic = vec3(0.0);
+	if (u_has_metallic_roughness)
+	{
+		metallic = texture( u_metallic_roughness_texture, uv ).xyz;
+	}
 
 	color.a = 1.0;
 	FragColor = color;
 	NormalColor = vec4(N * 0.5 + vec3(0.5),1.0);
-	ExtraColor = vec4(v_world_position, 1.0);
+	//ExtraColor = vec4(v_world_position, 1.0);
+	ExtraColor = vec4(metallic, 1.0);
 }
 
 \deferred.fs
@@ -567,16 +713,19 @@ uniform sampler2D u_normal_texture;
 uniform sampler2D u_extra_texture;
 uniform sampler2D u_depth_texture;
 
+uniform vec2 u_iRes;
+
 uniform mat4 u_inverse_viewprojection;
 
-#include "lightParameters"
+#include "lightUniforms"
 #include "lightFunctions"
 
 out vec4 FragColor;
 
 void main()
 {
-	vec2 uv = v_uv;
+	//vec2 uv = v_uv;
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
 	vec4 albedo = texture( u_color_texture, uv );
 	vec4 normal = texture( u_normal_texture, uv);
 	vec4 extra = texture( u_extra_texture, uv);

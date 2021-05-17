@@ -224,6 +224,15 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 							GL_FLOAT);	//precision
 	}
 
+	if (illumination_fbo.fbo_id == 0)
+	{
+		illumination_fbo.create(Application::instance->window_width, Application::instance->window_height,
+			1, 			//three textures
+			GL_RGB, 		//three channels
+			GL_UNSIGNED_BYTE, //1 byte
+			true);	//depth texture
+	}
+
 	gbuffers_fbo.bind();
 	glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -248,7 +257,16 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 		renderGBuffers(camera);
 	}
 	else {
+		gbuffers_fbo.depth_texture->copyTo(
+			illumination_fbo.depth_texture);
+	//	glDepthMask(false); //now we can block writing to it
+		illumination_fbo.bind();
+		glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		renderReconstructedScene(scene, camera);
+		illumination_fbo.unbind();
+		glDisable(GL_BLEND);
+		illumination_fbo.color_textures[0]->toViewport();
 	}
 	
 }
@@ -277,20 +295,35 @@ void Renderer::renderGBuffers(Camera* camera)
 	glViewport(0, 0, w, h);
 }
 
-void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
+void Renderer::uploadDefferedUniforms(Shader* shader, GTR::Scene* scene, Camera* camera)
 {
-	Mesh* quad = Mesh::getQuad();
-	Shader* shader = Shader::Get("deferred");
-	shader->enable();
+	int w = Application::instance->window_width;
+	int h = Application::instance->window_height;
+
+	Matrix44 inv_viewproj = camera->viewprojection_matrix;
+	inv_viewproj.inverse();
+
+	//gbuffers textures
 	shader->setTexture("u_color_texture", gbuffers_fbo.color_textures[0], 0);
 	shader->setTexture("u_normal_texture", gbuffers_fbo.color_textures[1], 1);
 	shader->setTexture("u_extra_texture", gbuffers_fbo.color_textures[2], 2);
 	shader->setTexture("u_depth_texture", gbuffers_fbo.depth_texture, 3);
-	shader->setUniform("u_ambient_light", scene->ambient_light);
 
-	Matrix44 inv_viewproj = camera->viewprojection_matrix;
-	inv_viewproj.inverse();
+	shader->setUniform("u_ambient_light", scene->ambient_light);
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	//inverse projection of the camera to reconstruct world pos
 	shader->setUniform("u_inverse_viewprojection", inv_viewproj);
+	//inverse window resolution
+	shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+}
+
+void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
+{
+	/**Render directional light using a quad**/
+	Mesh* quad = Mesh::getQuad();
+	Shader* shader = Shader::Get("deferred");
+	shader->enable();
+	uploadDefferedUniforms(shader, scene, camera);
 
 	//Multipass
 	for (int i = 0; i < lights.size(); i++)
@@ -298,14 +331,54 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 		LightEntity* light = lights[i];
 		//check if light is inside the camera frustum
 		int inside = (int)camera->testSphereInFrustum(light->model.getTranslation(), light->max_distance);
-		if (inside == 0)
+		if (inside == 0 || light->light_type != DIRECTIONAL)
 			continue;
 
 		light->uploadToShader(shader);
+
 		quad->render(GL_TRIANGLES);
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_ONE, GL_ONE);
 	}
+	glDisable(GL_BLEND);
+	shader->disable();
+
+	/**Render point and spot lights using spheres**/
+	Mesh* sphere = Mesh::Get("data/meshes/sphere.obj", true);
+	shader = Shader::Get("deferred_ws");
+	shader->enable();
+	uploadDefferedUniforms(shader, scene, camera);
+	
+	glEnable(GL_CULL_FACE);
+	//render only the backfacing triangles of the sphere
+	glFrontFace(GL_CW);
+
+	//no add ambient light --> was added by the directional light
+	shader->setUniform("u_ambient_light", Vector3());
+	
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+
+	//Multipass
+	for (int i = 0; i < lights.size(); i++)
+	{
+		LightEntity* light = lights[i];
+		//check if light is inside the camera frustum
+		int inside = (int)camera->testSphereInFrustum(light->model.getTranslation(), light->max_distance);
+		if (inside == 0 || light->light_type == DIRECTIONAL)
+			continue;
+
+		light->uploadToShader(shader);
+		Vector3 lpos = light->model.getTranslation();
+		Matrix44 m;
+		m.setTranslation(lpos.x, lpos.y, lpos.z);
+		float dist = light->max_distance;
+		m.scale(dist, dist, dist);
+		shader->setUniform("u_model", m);
+		
+		sphere->render(GL_TRIANGLES);
+	}
+
+	//restore it
+	glFrontFace(GL_CCW);
 	glDisable(GL_BLEND);
 	shader->disable();
 }
@@ -712,4 +785,28 @@ Texture* GTR::CubemapFromHDRE(const char* filename)
 	return texture;
 	*/
 	return NULL;
+}
+
+void GTR::Renderer::resizeFBOs()
+{
+	if (gbuffers_fbo.fbo_id != 0)
+	{
+		gbuffers_fbo.freeTextures();
+		gbuffers_fbo.create(Application::instance->window_width,
+			Application::instance->window_height,
+			3,	//num textures
+			GL_RGBA,
+			GL_FLOAT);	//precision
+	}
+
+	if (illumination_fbo.fbo_id != 0)
+	{
+		illumination_fbo.freeTextures();
+		illumination_fbo.create(Application::instance->window_width, 
+			Application::instance->window_height,
+			1, 			//three textures
+			GL_RGB, 		//three channels
+			GL_UNSIGNED_BYTE, //1 byte
+			true);	//depth texture
+	}
 }

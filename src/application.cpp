@@ -373,5 +373,6 @@ void Application::onResize(int width, int height)
 	camera->aspect =  width / (float)height;
 	window_width = width;
 	window_height = height;
+	renderer->resizeFBOs();
 }
 

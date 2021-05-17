@@ -78,6 +78,7 @@ namespace GTR {
 		FBO fbo;
 		FBO shadow_singlepass;
 		FBO gbuffers_fbo;
+		FBO illumination_fbo;
 		Texture* color_buffer;
 		eRendererCondition renderer_cond;
 		eRenderMode render_mode;
@@ -122,6 +123,9 @@ namespace GTR {
 		//show gBuffers
 		void renderGBuffers(Camera* camera);
 
+		//upload shadrer uniforms used for the deferred
+		void uploadDefferedUniforms(Shader* shader, GTR::Scene* scene, Camera* camera);
+
 		//use gBufferes to reconstruct the scene
 		void renderReconstructedScene(GTR::Scene* scene, Camera* camera);
 
@@ -139,6 +143,8 @@ namespace GTR {
 		void renderLights(Camera* camera);
 
 		void changeQualityFBO();
+
+		void resizeFBOs();
 	};
 
 	Texture* CubemapFromHDRE(const char* filename);
