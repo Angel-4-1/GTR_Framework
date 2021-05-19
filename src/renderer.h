@@ -30,6 +30,11 @@ namespace GTR {
 		SHOW_GBUFFERS = 10
 	};
 
+	enum eRenderDeferredMode {
+		DEFERRED_PBR = 0,
+		DEFERRED_SHADOWMAP = 1
+	};
+
 	enum ePipelineMode {
 		FORWARD,
 		DEFERRED
@@ -82,6 +87,7 @@ namespace GTR {
 		Texture* color_buffer;
 		eRendererCondition renderer_cond;
 		eRenderMode render_mode;
+		eRenderDeferredMode render_deferred_mode;
 		ePipelineMode pipeline_mode;
 		eQuality quality;
 		std::vector< renderCall > render_calls;
@@ -103,7 +109,8 @@ namespace GTR {
 		void renderToFBO(GTR::Scene* scene, Camera* camera);
 
 		//create shadowmaps for each light of the scene
-		void createShadowMaps(Scene* scene, Camera* camera, bool singlepass = false);
+		void createShadowMaps(Scene* scene, Camera* camera);
+		void createShadowMapsUsingForward(Scene* scene, Camera* camera);
 
 		//obtain the shader to use
 		Shader* getShader();
@@ -134,7 +141,7 @@ namespace GTR {
 
 		//how to render with lights
 		void renderMultiPass(Shader* shader, Mesh* mesh, bool sendShadowMap = false);
-		void renderSinglePass(Shader* shader, Mesh* mesh, bool sendShadowMap = false);
+		void renderSinglePass(Shader* shader, Mesh* mesh);
 		
 		//show debug menu using IMGUI
 		void renderInMenu();

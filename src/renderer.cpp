@@ -18,6 +18,7 @@ using namespace GTR;
 Renderer::Renderer() {
 	lights = Scene::instance->lights;
 	render_mode = eRenderMode::SHOW_SHADOWMAP;
+	render_deferred_mode = eRenderDeferredMode::DEFERRED_PBR;
 	pipeline_mode = ePipelineMode::FORWARD;
 	renderer_cond = eRendererCondition::REND_COND_NONE;
 	color_buffer = new Texture(Application::instance->window_width, Application::instance->window_height);
@@ -30,7 +31,7 @@ Renderer::Renderer() {
 
 void Renderer::renderToFBO(GTR::Scene* scene, Camera* camera)
 {
-	if (render_mode == SHOW_SHADOWMAP && pipeline_mode == FORWARD)
+	if ( render_mode == SHOW_SHADOWMAP && pipeline_mode == FORWARD )
 	{
 		//create the shadow maps for each light
 		createShadowMaps(scene,camera);
@@ -50,33 +51,16 @@ void Renderer::renderToFBO(GTR::Scene* scene, Camera* camera)
 		
 		if (show_depth_camera)
 		{
-			/*float w = Application::instance->window_width;
-			float h = Application::instance->window_height;
-			glViewport(0, 0, w, h / 3);
-			glScissor(0, 0, w, h / 3);
-			glEnable(GL_SCISSOR_TEST);
-
-			shader->enable();
-			glDisable(GL_DEPTH_TEST);
-
-			//upload uniforms
-			shader->setUniform("u_camera_nearfar", Vector2(camera->near_plane, camera->far_plane));
-			//fbo.depth_texture->toViewport(shader);
-			shadow_singlepass.depth_texture->toViewport(shader);
-
-			glEnable(GL_DEPTH_TEST);
-
-			shader->disable();
-
-			//restore viewport
-			glDisable(GL_SCISSOR_TEST);
-			glViewport(0, 0, w, h);*/
-
 			if(light_camera < lights.size())
 				lights[light_camera]->renderShadowFBO(shader);
 		}
 	}
 	else {
+		if (render_deferred_mode == DEFERRED_SHADOWMAP && pipeline_mode == DEFERRED)
+		{
+			//create the shadow maps for each light
+			createShadowMapsUsingForward(scene, camera);
+		}
 		renderScene(scene, camera);
 	}
 
@@ -257,9 +241,6 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 		renderGBuffers(camera);
 	}
 	else {
-		gbuffers_fbo.depth_texture->copyTo(
-			illumination_fbo.depth_texture);
-	//	glDepthMask(false); //now we can block writing to it
 		illumination_fbo.bind();
 		glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -267,8 +248,14 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 		illumination_fbo.unbind();
 		glDisable(GL_BLEND);
 		illumination_fbo.color_textures[0]->toViewport();
+
+		if (render_deferred_mode == DEFERRED_SHADOWMAP && show_depth_camera)
+		{
+			Shader* shader = Shader::Get("depth");
+			if (light_camera < lights.size())
+				lights[light_camera]->renderShadowFBO(shader);
+		}
 	}
-	
 }
 
 //show each one of the 4 textures stored at gbuffers_fbo
@@ -309,16 +296,32 @@ void Renderer::uploadDefferedUniforms(Shader* shader, GTR::Scene* scene, Camera*
 	shader->setTexture("u_extra_texture", gbuffers_fbo.color_textures[2], 2);
 	shader->setTexture("u_depth_texture", gbuffers_fbo.depth_texture, 3);
 
+	shader->setUniform("u_camera_position", camera->eye);
 	shader->setUniform("u_ambient_light", scene->ambient_light);
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
 	//inverse projection of the camera to reconstruct world pos
 	shader->setUniform("u_inverse_viewprojection", inv_viewproj);
 	//inverse window resolution
 	shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+
+	//render shadows?
+	bool shadows = false;
+	if (render_deferred_mode == DEFERRED_SHADOWMAP)
+	{
+		shadows = true;
+	}
+	shader->setUniform("u_render_shadows", shadows);
+
 }
 
 void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 {
+	bool shadows = false;
+	if (render_deferred_mode == DEFERRED_SHADOWMAP)
+	{
+		shadows = true;
+	}
+
 	/**Render directional light using a quad**/
 	Mesh* quad = Mesh::getQuad();
 	Shader* shader = Shader::Get("deferred");
@@ -334,7 +337,7 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 		if (inside == 0 || light->light_type != DIRECTIONAL)
 			continue;
 
-		light->uploadToShader(shader);
+		light->uploadToShader(shader, shadows);
 
 		quad->render(GL_TRIANGLES);
 	}
@@ -366,7 +369,7 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 		if (inside == 0 || light->light_type == DIRECTIONAL)
 			continue;
 
-		light->uploadToShader(shader);
+		light->uploadToShader(shader, shadows);
 		Vector3 lpos = light->model.getTranslation();
 		Matrix44 m;
 		m.setTranslation(lpos.x, lpos.y, lpos.z);
@@ -527,7 +530,7 @@ void GTR::Renderer::renderMultiPass(Shader* shader, Mesh* mesh, bool sendShadowM
 	glDepthFunc(GL_LESS);
 }
 
-void GTR::Renderer::renderSinglePass(Shader* shader, Mesh* mesh, bool sendShadowMap)
+void GTR::Renderer::renderSinglePass(Shader* shader, Mesh* mesh)
 {
 	//collect info about all the lights of the scene
 	Vector3 light_position[10];
@@ -561,33 +564,6 @@ void GTR::Renderer::renderSinglePass(Shader* shader, Mesh* mesh, bool sendShadow
 	shader->setUniform1Array("u_light_max_distance", (float*)&light_max_distance, num_lights);
 	shader->setUniform2Array("u_light_spot_vars", (float*)&light_spot_vars, num_lights);
 	shader->setUniform("u_num_lights", num_lights);
-
-	//singlepass shadowmap?
-	if (sendShadowMap)
-	{
-		bool light_cast_shadow[10];
-		Matrix44 light_shadow_viewproj[10];
-		float light_shadow_bias[10];
-		float light_pos_atlas[10];
-
-		for (int i = 0; i < num_lights; i++)
-		{
-			light_cast_shadow[i] = lights[i]->cast_shadow;
-			if (!lights[i]->cast_shadow)
-				continue;
-
-			light_shadow_viewproj[i] = lights[i]->camera->viewprojection_matrix;
-			light_shadow_bias[i] = lights[i]->shadow_bias;
-			light_pos_atlas[i] = i * 512;
-		//	light_pos_atlas[i] = i * 0.25;
-		}
-		shader->setUniform1Array("u_light_cast_shadow", (float*)&light_cast_shadow, num_lights);
-		shader->setUniform4Array("u_light_shadow_viewproj", (float*)&light_shadow_viewproj, num_lights);
-		shader->setUniform1Array("u_light_shadow_bias", (float*)&light_shadow_bias, num_lights);
-		shader->setUniform1Array("u_light_pos_atlas", (float*)&light_pos_atlas, num_lights);
-		//shadow atlas
-		shader->setTexture("u_shadowmap_texture", shadow_singlepass.depth_texture, 8);
-	}
 
 	mesh->render(GL_TRIANGLES);
 }
@@ -629,7 +605,7 @@ void GTR::Renderer::changeQualityFBO()
 }
 
 //create the shadowmap of each light in the scene
-void GTR::Renderer::createShadowMaps(Scene* scene, Camera* camera, bool singlepass)
+void GTR::Renderer::createShadowMaps(Scene* scene, Camera* camera)
 {
 	for (int i = 0; i < lights.size(); i++)
 	{
@@ -652,48 +628,27 @@ void GTR::Renderer::createShadowMaps(Scene* scene, Camera* camera, bool singlepa
 		light->updateCamera();
 		
 		renderScene(scene, light->camera);
+
 		//disable it to render back to the screen
 		light->shadow_fbo->unbind();
 		//allow to render back to the color buffer
 		glColorMask(true, true, true, true);
 		rendering_shadowmap = false;
 	}
+}
 
-	if (singlepass)
-	{
-		
-		float w = Application::instance->window_width;
-		float h = Application::instance->window_height;
+//create the shadowmap of each light in the scene
+void GTR::Renderer::createShadowMapsUsingForward(Scene* scene, Camera* camera)
+{
+	ePipelineMode prev = pipeline_mode;
+	pipeline_mode = FORWARD;
+	eRenderMode rend_prev = render_mode;
+	render_mode = SHOW_SHADOWMAP;
 
-		for (int i = 0; i < lights.size(); i++)
-		{
-			if (!lights[i]->cast_shadow || lights[i]->shadow_fbo == NULL)
-				continue;
-
-			Texture* shadowmap = lights[i]->shadow_fbo->depth_texture;
-
-			glViewport(i * 512, 0, 512, 512);
-			glScissor(i * 512, 0, 512, 512);
-			glEnable(GL_SCISSOR_TEST);
-			
-			rendering_shadowmap = true;
-			shadow_singlepass.bind();
-			//disable writing to the color buffer
-			glColorMask(false, false, false, false);
-			//clear the depth buffer only (don't care of color)
-			glClear(GL_DEPTH_BUFFER_BIT);
-			renderScene(scene, lights[i]->camera);
-			//disable it to render back to the screen
-			shadow_singlepass.unbind();
-			//allow to render back to the color buffer
-			glColorMask(true, true, true, true);
-			rendering_shadowmap = false;
-
-			glDisable(GL_SCISSOR_TEST);
-			glViewport(0, 0, w, h);
-		}
-		
-	}
+	createShadowMaps(scene, camera);
+	
+	pipeline_mode = prev;
+	render_mode = rend_prev;
 }
 
 //get the shader based on the variable render_mode
@@ -756,6 +711,16 @@ void Renderer::renderInMenu()
 			ImGui::Checkbox("Show Depth Cameras", &show_depth_camera);
 			ImGui::SliderInt("Depth Light Camera", &light_camera, 0, lights.size() - 1);
 			if(light_camera < lights.size() && light_camera >= 0)
+				ImGui::Text(lights[light_camera]->name.c_str());
+		}
+	}
+	else {
+		ImGui::Combo("Render Mode", (int*)&render_deferred_mode, "PBR\0SHADOWMAP", 2);
+		if (render_deferred_mode == DEFERRED_SHADOWMAP)
+		{
+			ImGui::Checkbox("Show Depth Cameras", &show_depth_camera);
+			ImGui::SliderInt("Depth Light Camera", &light_camera, 0, lights.size() - 1);
+			if (light_camera < lights.size() && light_camera >= 0)
 				ImGui::Text(lights[light_camera]->name.c_str());
 		}
 	}
