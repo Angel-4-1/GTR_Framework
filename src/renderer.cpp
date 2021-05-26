@@ -18,15 +18,19 @@ using namespace GTR;
 Renderer::Renderer() {
 	lights = Scene::instance->lights;
 	render_mode = eRenderMode::SHOW_SHADOWMAP;
-	render_deferred_mode = eRenderDeferredMode::DEFERRED_PBR;
-	pipeline_mode = ePipelineMode::FORWARD;
+	render_deferred_mode = eRenderDeferredMode::DEFERRED_SHADOWMAP;
+	pipeline_mode = ePipelineMode::DEFERRED;
 	renderer_cond = eRendererCondition::REND_COND_NONE;
 	color_buffer = new Texture(Application::instance->window_width, Application::instance->window_height);
 	quality = eQuality::LOW;
 	fbo.create(1024, 1024);
+	ssao_fbo.create(Application::instance->window_width, Application::instance->window_height, 1, GL_RGBA, GL_UNSIGNED_BYTE, false);
 	light_camera = 0;
 	//limited to 4 lights
 	shadow_singlepass.create(4 * 512, 512);
+	ao_buffer = NULL;
+	show_ao = false;
+	tone_mapper.init();
 }
 
 void Renderer::renderToFBO(GTR::Scene* scene, Camera* camera)
@@ -75,7 +79,7 @@ void Renderer::renderScene(GTR::Scene* scene, Camera* camera)
 	if (pipeline_mode == FORWARD)
 		renderForward(scene, render_calls, camera);
 	else if (pipeline_mode == DEFERRED)
-		renderDeferred(scene, render_calls, camera);
+		renderDeferred(scene, render_calls, camera);		
 }
 
 // Calculate distance between two 3D points using the pythagoras theorem
@@ -213,7 +217,7 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 		illumination_fbo.create(Application::instance->window_width, Application::instance->window_height,
 			1, 			//three textures
 			GL_RGB, 		//three channels
-			GL_UNSIGNED_BYTE, //1 byte
+			GL_FLOAT, //1 byte
 			true);	//depth texture
 	}
 
@@ -231,6 +235,15 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 
 	gbuffers_fbo.unbind();
 	
+	//compute SSAO
+	if (!ao_buffer)
+	{
+		ao_buffer = new Texture(Application::instance->window_width * 0.5, Application::instance->window_height * 0.5, GL_LUMINANCE, GL_UNSIGNED_BYTE);
+		blur_ao_buffer = new Texture(Application::instance->window_width * 0.5, Application::instance->window_height * 0.5, GL_LUMINANCE, GL_UNSIGNED_BYTE);
+	}
+	ssao.apply(gbuffers_fbo.depth_texture, gbuffers_fbo.color_textures[1], camera, ao_buffer);
+
+	//apply illumination	
 	glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glDisable(GL_BLEND);
@@ -240,6 +253,33 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 	{
 		renderGBuffers(camera);
 	}
+	else if (show_ao && ao_buffer) {
+		ao_buffer->toViewport();
+		////---------------
+		////blur ao
+		//ssao_fbo.bind();
+		//FBO* fboS = Texture::getGlobalFBO(blur_ao_buffer);
+		//fboS->bind();
+		//glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
+		//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		//checkGLErrors();
+		//Mesh* quad = Mesh::getQuad();
+
+		//glDisable(GL_DEPTH_TEST);
+		//glDisable(GL_BLEND);
+		//Shader* blur_ao = Shader::Get("blur_ssao");
+		//blur_ao->enable();
+		//blur_ao->setTexture("u_texture", ao_buffer, 0);
+		//blur_ao->setUniform("u_iRes", Vector2(1.0 / (float)ao_buffer->width, 1.0 / (float)ao_buffer->height));
+		//quad->render(GL_TRIANGLES);
+		////ao_buffer->toViewport();
+		//blur_ao->disable();
+		////ssao_fbo.unbind();
+		//fboS->unbind();
+		////---------------
+		//blur_ao_buffer->toViewport();
+		////ssao_fbo.color_textures[0]->toViewport();
+	}
 	else {
 		illumination_fbo.bind();
 		glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
@@ -247,7 +287,42 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 		renderReconstructedScene(scene, camera);
 		illumination_fbo.unbind();
 		glDisable(GL_BLEND);
-		illumination_fbo.color_textures[0]->toViewport();
+
+		if (!linear_correction) {
+			illumination_fbo.color_textures[0]->toViewport();
+		}
+		else {
+			if (gamma_fbo.fbo_id == 0) {
+				gamma_fbo.create(Application::instance->window_width, Application::instance->window_height,
+					1, 			//three textures
+					GL_RGB, 		//three channels
+					GL_FLOAT, //1 byte
+					true);	//depth texture
+			}
+
+			gamma_fbo.bind();
+			glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			Mesh* quad = Mesh::getQuad();
+			Shader* shader;
+			if(use_tone_mapper)
+				shader = Shader::Get("tone_mapper");
+			else
+				shader = Shader::Get("gamma");
+
+			shader->enable();
+			int w = Application::instance->window_width;
+			int h = Application::instance->window_height;
+			shader->setTexture("u_texture", illumination_fbo.color_textures[0], 0);
+			shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+			tone_mapper.uploadToShader(shader);
+			quad->render(GL_TRIANGLES);
+			glDisable(GL_BLEND);
+			shader->disable();
+			gamma_fbo.unbind();
+
+			gamma_fbo.color_textures[0]->toViewport();
+		}
 
 		if (render_deferred_mode == DEFERRED_SHADOWMAP && show_depth_camera)
 		{
@@ -263,14 +338,36 @@ void Renderer::renderGBuffers(Camera* camera)
 {
 	int w = Application::instance->window_width;
 	int h = Application::instance->window_height;
-	glViewport(0, h * 0.5, w * 0.5, h * 0.5);
-	gbuffers_fbo.color_textures[0]->toViewport();
 
-	glViewport(w * 0.5, h * 0.5, w * 0.5, h * 0.5);
-	gbuffers_fbo.color_textures[1]->toViewport();
+	if (show_gbuffers_alpha) {
+		Shader* shader = Shader::Get("gbuffers_alpha");
+		shader->enable();
+		//inverse window resolution
+		shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+		shader->setTexture("u_texture", gbuffers_fbo.color_textures[0], 1);
+		glViewport(0, h * 0.5, w * 0.5, h * 0.5);
+		gbuffers_fbo.color_textures[0]->toViewport(shader);
 
-	glViewport(0, 0, w * 0.5, h * 0.5);
-	gbuffers_fbo.color_textures[2]->toViewport();
+		shader->setTexture("u_texture", gbuffers_fbo.color_textures[1], 1);
+		glViewport(w * 0.5, h * 0.5, w * 0.5, h * 0.5);
+		gbuffers_fbo.color_textures[1]->toViewport(shader);
+
+		shader->setTexture("u_texture", gbuffers_fbo.color_textures[2], 1);
+		glViewport(0, 0, w * 0.5, h * 0.5);
+		gbuffers_fbo.color_textures[2]->toViewport(shader);
+
+		shader->disable();
+	}
+	else {
+		glViewport(0, h * 0.5, w * 0.5, h * 0.5);
+		gbuffers_fbo.color_textures[0]->toViewport();
+
+		glViewport(w * 0.5, h * 0.5, w * 0.5, h * 0.5);
+		gbuffers_fbo.color_textures[1]->toViewport();
+
+		glViewport(0, 0, w * 0.5, h * 0.5);
+		gbuffers_fbo.color_textures[2]->toViewport();
+	}	
 
 	Shader* depth_shader = Shader::Get("depth");
 	depth_shader->enable();
@@ -303,6 +400,8 @@ void Renderer::uploadDefferedUniforms(Shader* shader, GTR::Scene* scene, Camera*
 	shader->setUniform("u_inverse_viewprojection", inv_viewproj);
 	//inverse window resolution
 	shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+	shader->setUniform("u_linear_correction", linear_correction);
+	shader->setUniform("u_gamma", tone_mapper.gamma);
 
 	//render shadows?
 	bool shadows = false;
@@ -311,6 +410,14 @@ void Renderer::uploadDefferedUniforms(Shader* shader, GTR::Scene* scene, Camera*
 		shadows = true;
 	}
 	shader->setUniform("u_render_shadows", shadows);
+
+	bool has_ao = false;
+	if (ao_buffer)
+	{
+		has_ao = true;
+		shader->setTexture("u_ssao_texture", ao_buffer, 4);
+	}
+	shader->setUniform("u_has_ssao", has_ao);
 
 }
 
@@ -327,6 +434,7 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 	Shader* shader = Shader::Get("deferred");
 	shader->enable();
 	uploadDefferedUniforms(shader, scene, camera);
+	shader->setUniform("u_is_emissor", true);
 
 	//Multipass
 	for (int i = 0; i < lights.size(); i++)
@@ -356,6 +464,8 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 
 	//no add ambient light --> was added by the directional light
 	shader->setUniform("u_ambient_light", Vector3());
+	//no add emissive again
+	shader->setUniform("u_is_emissor", false);
 	
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE);
@@ -416,22 +526,23 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	//choose a shader
 	Shader* shader = getShader();
 
-	if (pipeline_mode == DEFERRED)
-	{
-		shader = Shader::Get("gbuffers");
-		if (material->alpha_mode == GTR::eAlphaMode::BLEND)
-		{
-			glDisable(GL_BLEND);
-			return;
-		}
-	}
-
     assert(glGetError() == GL_NO_ERROR);
 
 	//no shader? then nothing to render
 	if (!shader)
 		return;
 	shader->enable();
+
+	if (pipeline_mode == DEFERRED)
+	{
+		if (material->alpha_mode == GTR::eAlphaMode::BLEND)
+		{
+			shader->setUniform("u_apply_dithering", true);
+		}
+		else {
+			shader->setUniform("u_apply_dithering", false);
+		}
+	}
 
 	//upload uniforms
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
@@ -449,6 +560,15 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 
 	//upload material properties to the shader
 	material->uploadToShader(shader);
+
+	//ssao
+	/*bool has_ao = false;
+	if (ao_buffer)
+	{
+		has_ao = true;
+		shader->setTexture("u_ssao_texture", ao_buffer, 4);
+	}
+	shader->setUniform("u_has_ssao", has_ao);*/
 
 	if (pipeline_mode == FORWARD)
 	{
@@ -691,6 +811,11 @@ Shader* GTR::Renderer::getShader()
 			break;
 	}
 
+	if (pipeline_mode == DEFERRED)
+	{
+		shader = Shader::Get("gbuffers");
+	}
+
 	return shader;
 }
 
@@ -723,10 +848,27 @@ void Renderer::renderInMenu()
 			if (light_camera < lights.size() && light_camera >= 0)
 				ImGui::Text(lights[light_camera]->name.c_str());
 		}
-	}
 
-	if(pipeline_mode == DEFERRED)
+		ImGui::Checkbox("Linear Correction", &linear_correction);
+		if (linear_correction)
+		{
+			ImGui::SliderFloat("Gamma correction", &tone_mapper.gamma, 0.1, 3);
+			ImGui::Checkbox("Tone Mapper", &use_tone_mapper);
+			if (use_tone_mapper)
+			{
+				ImGui::SliderFloat("TM Scale", &tone_mapper.scale, 0.1, 5);
+				ImGui::SliderFloat("TM White", &tone_mapper.white_lum, 0.1, 5);
+				ImGui::SliderFloat("TM Average luminance", &tone_mapper.average_lum, 0.1, 5);
+			}
+		}
+	}
+	ImGui::Checkbox("Show AO", &show_ao);
+	if (pipeline_mode == DEFERRED)
+	{
 		ImGui::Checkbox("Show GBuffers", &show_gbuffers);
+		if(show_gbuffers)
+			ImGui::Checkbox("Show Alpha GBuffers", &show_gbuffers_alpha);
+	}
 
 	if (changed_fbo)
 		changeQualityFBO();
@@ -771,7 +913,92 @@ void GTR::Renderer::resizeFBOs()
 			Application::instance->window_height,
 			1, 			//three textures
 			GL_RGB, 		//three channels
-			GL_UNSIGNED_BYTE, //1 byte
+			GL_FLOAT, //1 byte
 			true);	//depth texture
 	}
+
+	if (ao_buffer)
+	{
+		ao_buffer->clear();
+		ao_buffer->create(Application::instance->window_width, Application::instance->window_height, GL_LUMINANCE, GL_UNSIGNED_BYTE);
+	}
+
+	if (gamma_fbo.fbo_id == 0) {
+		gamma_fbo.create(Application::instance->window_width, Application::instance->window_height,
+			1, 			//three textures
+			GL_RGB, 		//three channels
+			GL_FLOAT, //1 byte
+			true);	//depth texture
+	}
+}
+
+std::vector<Vector3> generateSpherePoints(int num, float radius, bool hemi)
+{
+	std::vector<Vector3> points;
+	points.resize(num);
+	for (int i = 0; i < num; i += 3)
+	{
+		Vector3& p = points[i];
+		float u = random();
+		float v = random();
+		float theta = u * 2.0 * PI;
+		float phi = acos(2.0 * v - 1.0);
+		float r = cbrt(random() * 0.9 + 0.1) * radius;
+		float sinTheta = sin(theta);
+		float cosTheta = cos(theta);
+		float sinPhi = sin(phi);
+		float cosPhi = cos(phi);
+		p.x = r * sinPhi * cosTheta;
+		p.y = r * sinPhi * sinTheta;
+		p.z = r * cosPhi;
+		if (hemi && p.z < 0)
+			p.z *= -1.0;
+	}
+	return points;
+}
+
+GTR::SSAOFX::SSAOFX()
+{
+	intensity = 1.0;
+	//random points
+	points = generateSpherePoints(64, 1.0, true);
+}
+
+void GTR::SSAOFX::apply(Texture* depth_buffer, Texture* normal_buffer, Camera* cam, Texture* output)
+{
+	////bind the texture we want to change
+	//depth_buffer->bind();
+
+	////disable using mipmaps
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+	////enable bilinear filtering
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	//depth_buffer->unbind();
+
+	FBO* fboS = Texture::getGlobalFBO(output);
+	fboS->bind();
+
+
+	Mesh* quad = Mesh::getQuad();
+
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+
+	Shader* shader = Shader::Get("ssao");
+	shader->enable();
+	shader->setUniform("u_viewprojection", cam->viewprojection_matrix);
+	shader->setTexture("u_normal_texture", normal_buffer, 1);
+	shader->setTexture("u_depth_texture", depth_buffer, 3);
+	shader->setUniform3Array("u_points", (float*)&points[0], points.size());
+	//viewprojection to obtain the uv in the depthtexture of any random position of our world
+	Matrix44 inv_viewproj = cam->viewprojection_matrix;
+	inv_viewproj.inverse();
+	shader->setUniform("u_inverse_viewprojection", inv_viewproj);
+	shader->setUniform("u_iRes", Vector2(1.0 / (float)depth_buffer->width, 1.0 / (float)depth_buffer->height));
+
+	quad->render(GL_TRIANGLES);
+	
+	fboS->unbind();
 }

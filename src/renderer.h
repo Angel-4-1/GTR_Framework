@@ -72,6 +72,51 @@ namespace GTR {
 				isAlpha = false;
 		}
 	};
+
+	class toneMapper {
+	public:
+		float gamma = 0;
+		float scale = 0;
+		float white_lum = 0;
+		float average_lum = 0;
+
+		toneMapper() {
+			this->init();
+		}
+
+		toneMapper(float _gamma, float _scale, float _white_lum,float _average_lum) {
+			gamma = _gamma;
+			scale = _scale;
+			white_lum = _white_lum;
+			average_lum = _average_lum;
+		}
+
+		void init() {
+			gamma = 2.2;
+			scale = 1.0;
+			white_lum = 1.0;
+			average_lum = 1.0;
+		}
+
+		void uploadToShader(Shader* shader) {
+			float inverse_gamma = 1.0 / gamma;
+			shader->setUniform("u_igamma", inverse_gamma);
+			shader->setUniform("u_gamma", gamma);
+			shader->setUniform("u_scale", scale);
+			float lumwhite = white_lum * white_lum;
+			shader->setUniform("u_lumwhite2", lumwhite);
+			shader->setUniform("u_average_lum", average_lum);
+		}
+	};
+
+	class SSAOFX {
+	public:
+		float intensity;
+		std::vector<Vector3> points;
+
+		SSAOFX();
+		void apply(Texture* depth_buffer, Texture* normal_buffer, Camera* cam, Texture* output);
+	};
 	
 	// This class is in charge of rendering anything in our system.
 	// Separating the render from anything else makes the code cleaner
@@ -84,6 +129,8 @@ namespace GTR {
 		FBO shadow_singlepass;
 		FBO gbuffers_fbo;
 		FBO illumination_fbo;
+		FBO ssao_fbo;
+		FBO gamma_fbo;
 		Texture* color_buffer;
 		eRendererCondition renderer_cond;
 		eRenderMode render_mode;
@@ -92,12 +139,20 @@ namespace GTR {
 		eQuality quality;
 		std::vector< renderCall > render_calls;
 		std::vector< LightEntity* > lights;
+		SSAOFX ssao;
+		Texture* ao_buffer;
+		Texture* blur_ao_buffer;
+		toneMapper tone_mapper;
 
 		//some flags
+		bool show_ao;
 		bool rendering_shadowmap = false;
 		bool show_depth_camera = false;
 		bool show_gbuffers = false;
+		bool show_gbuffers_alpha = false;
 		bool isRenderingBoundingBox = false;
+		bool linear_correction = false;
+		bool use_tone_mapper = false;
 		int light_camera;	//light to show on depth camera
 
 		float computeDistanceToCamera(Matrix44 node_model, Mesh* mesh, Vector3 cam_pos);
@@ -152,6 +207,7 @@ namespace GTR {
 		void changeQualityFBO();
 
 		void resizeFBOs();
+		
 	};
 
 	Texture* CubemapFromHDRE(const char* filename);
