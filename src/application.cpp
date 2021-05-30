@@ -70,6 +70,25 @@ Application::Application(int window_width, int window_height, SDL_Window* window
 	if (!scene->load("data/scene.json"))
 		exit(1);
 
+	//crete some random point lights
+	int counter = 0;
+	for (int i = 0; i < 5; i++) {
+		for (int j = 0; j < 5; j++) {
+			Vector3 pos = Vector3((200 * i) - 300, 50, (200 * j) - 300);
+			Vector3 col = Vector3((float)rand() / RAND_MAX, (float)rand() / RAND_MAX, (float)rand() / RAND_MAX);
+			GTR::LightEntity* light = new GTR::LightEntity();
+			light->model.setIdentity();
+			light->model.translate(pos.x, pos.y, pos.z);
+			light->color = col;
+			light->intensity = 2.5;
+			light->name = "randomPoint" + std::to_string(counter);
+			light->mesh = Mesh::Get("data/meshes/sphere.obj", false);
+			scene->entities.push_back(light); light->scene = scene;
+			scene->lights.push_back((GTR::LightEntity*)light);
+			counter++;
+		}
+	}
+	
 	//update camera values after having read the file
 	camera->lookAt(scene->main_camera.eye, scene->main_camera.center, Vector3(0, 1, 0));
 	camera->fov = scene->main_camera.fov;
@@ -99,10 +118,6 @@ void Application::render(void)
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	else
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-	//lets render something
-	//Matrix44 model;
-	//renderer->renderPrefab( model, prefab, camera );
 
 	//renderer->renderScene(scene, camera);
 	renderer->renderToFBO(scene, camera);

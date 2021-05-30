@@ -98,7 +98,7 @@
       "area_size": 1500,
       "max_dist": 1000,
       "cast_shadows": true,
-      "shadow_bias": 0.002,
+      "shadow_bias": 0.003,
       "light_type": "DIRECTIONAL"
     }
   ]

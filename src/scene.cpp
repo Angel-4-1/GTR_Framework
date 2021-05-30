@@ -176,11 +176,12 @@ GTR::LightEntity::LightEntity()
 {
 	entity_type = LIGHT;
 	light_type = POINT;
-	intensity = 0;
-	max_distance = 0;
+	intensity = 1;
+	max_distance = 100;
 	cone_angle = 45;
 	area_size = 0;
 	spot_exponent = 1;
+	color = Vector3(1.0, 1.0, 1.0);
 	camera = new Camera();
 	shadow_fbo = new FBO();
 	shadow_fbo->setDepthOnly(1024, 1024);
@@ -228,6 +229,7 @@ void GTR::LightEntity::configure(cJSON* json)
 		
 		if (category == "POINT") {
 			light_type = POINT;
+			mesh = Mesh::Get("data/meshes/sphere.obj", false);
 		}
 		else if (category == "SPOT") {
 			light_type = SPOT;
@@ -312,6 +314,10 @@ void GTR::LightEntity::renderInMenu()
 		ImGui::Checkbox("Render", &render_light);
 		ImGui::SliderFloat("Area size", &ortho_cam_size, 0, 5000);
 	}
+	if (light_type == POINT)
+	{
+		ImGui::Checkbox("Render", &render_light);
+	}
 	ImGui::Combo("Light Type", (int*)&light_type, "DIRECTIONAL\0SPOT\0POINT", 3);
 	ImGui::ColorEdit3("Color", color.v);
 	ImGui::SliderFloat("Intensity", &intensity, 0, 10);
@@ -388,6 +394,7 @@ void GTR::LightEntity::renderShadowFBO(Shader* shader)
 //render a basic mesh on the position of the light
 void GTR::LightEntity::renderLight(Camera* camera)
 {
+
 	Shader* basic_shader = Shader::getDefaultShader("flat");
 	basic_shader->enable();
 	glDisable(GL_DEPTH_TEST);

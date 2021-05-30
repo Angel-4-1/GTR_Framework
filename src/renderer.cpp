@@ -21,7 +21,7 @@ Renderer::Renderer() {
 	render_deferred_mode = eRenderDeferredMode::DEFERRED_SHADOWMAP;
 	pipeline_mode = ePipelineMode::DEFERRED;
 	renderer_cond = eRendererCondition::REND_COND_NONE;
-	color_buffer = new Texture(Application::instance->window_width, Application::instance->window_height);
+	color_buffer = new Texture(Application::instance->window_width, Application::instance->window_height, GL_RGB, GL_HALF_FLOAT);
 	quality = eQuality::LOW;
 	fbo.create(1024, 1024);
 	ssao_fbo.create(Application::instance->window_width, Application::instance->window_height, 1, GL_RGBA, GL_UNSIGNED_BYTE, false);
@@ -255,38 +255,20 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 	}
 	else if (show_ao && ao_buffer) {
 		ao_buffer->toViewport();
-		////---------------
-		////blur ao
-		//ssao_fbo.bind();
-		//FBO* fboS = Texture::getGlobalFBO(blur_ao_buffer);
-		//fboS->bind();
-		//glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
-		//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		//checkGLErrors();
-		//Mesh* quad = Mesh::getQuad();
-
-		//glDisable(GL_DEPTH_TEST);
-		//glDisable(GL_BLEND);
-		//Shader* blur_ao = Shader::Get("blur_ssao");
-		//blur_ao->enable();
-		//blur_ao->setTexture("u_texture", ao_buffer, 0);
-		//blur_ao->setUniform("u_iRes", Vector2(1.0 / (float)ao_buffer->width, 1.0 / (float)ao_buffer->height));
-		//quad->render(GL_TRIANGLES);
-		////ao_buffer->toViewport();
-		//blur_ao->disable();
-		////ssao_fbo.unbind();
-		//fboS->unbind();
-		////---------------
-		//blur_ao_buffer->toViewport();
-		////ssao_fbo.color_textures[0]->toViewport();
 	}
 	else {
+	//	gbuffers_fbo.depth_texture->copyTo(illumination_fbo.depth_texture);
+		
 		illumination_fbo.bind();
 		glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glClear(GL_COLOR_BUFFER_BIT);
 		renderReconstructedScene(scene, camera);
+		if(!use_dithering)
+			renderAlphaElements(data, camera);
 		illumination_fbo.unbind();
+
 		glDisable(GL_BLEND);
+
 
 		if (!linear_correction) {
 			illumination_fbo.color_textures[0]->toViewport();
@@ -445,9 +427,17 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 		if (inside == 0 || light->light_type != DIRECTIONAL)
 			continue;
 
+		float prev_intensity = light->intensity;
+		if (linear_correction) {
+			light->intensity = 6 * prev_intensity;
+		}
 		light->uploadToShader(shader, shadows);
 
 		quad->render(GL_TRIANGLES);
+		//restore intensity
+		if (linear_correction) {
+			light->intensity = prev_intensity;
+		}
 	}
 	glDisable(GL_BLEND);
 	shader->disable();
@@ -479,6 +469,10 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 		if (inside == 0 || light->light_type == DIRECTIONAL)
 			continue;
 
+		float prev_intensity = light->intensity;
+		if (linear_correction) {
+			light->intensity = 5 * prev_intensity;
+		}
 		light->uploadToShader(shader, shadows);
 		Vector3 lpos = light->model.getTranslation();
 		Matrix44 m;
@@ -488,6 +482,10 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 		shader->setUniform("u_model", m);
 		
 		sphere->render(GL_TRIANGLES);
+		//restore intensity
+		if (linear_correction) {
+			light->intensity = prev_intensity;
+		}
 	}
 
 	//restore it
@@ -497,7 +495,7 @@ void Renderer::renderReconstructedScene(GTR::Scene* scene, Camera* camera)
 }
 
 //renders a mesh given its transform and material
-void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera)
+void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera, Shader* sh, ePipelineMode pipeline, eRenderMode mode)
 {
 	//in case there is nothing to do
 	if (!mesh || !mesh->getNumVertices() || !material )
@@ -524,7 +522,11 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
     assert(glGetError() == GL_NO_ERROR);
 
 	//choose a shader
-	Shader* shader = getShader();
+	Shader* shader;
+	if (sh == NULL)
+		shader = getShader();
+	else
+		shader = sh;
 
     assert(glGetError() == GL_NO_ERROR);
 
@@ -533,16 +535,35 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 		return;
 	shader->enable();
 
-	if (pipeline_mode == DEFERRED)
-	{
+	ePipelineMode _pipeline_mode;
+	if (pipeline == NO_PIPELINE)
+		_pipeline_mode = pipeline_mode;
+	else
+		_pipeline_mode = pipeline;
+
+	if (_pipeline_mode == DEFERRED)
+	{			
 		if (material->alpha_mode == GTR::eAlphaMode::BLEND)
 		{
-			shader->setUniform("u_apply_dithering", true);
+			if (use_dithering) {
+				shader->setUniform("u_apply_dithering", true);
+			} 
+			else {
+				shader->disable();
+				glDisable(GL_BLEND);
+				return;
+			}
 		}
 		else {
 			shader->setUniform("u_apply_dithering", false);
 		}
 	}
+
+	eRenderMode rending_mode;
+	if (mode == SHOW_NONE)
+		rending_mode = render_mode;
+	else
+		rending_mode = mode;
 
 	//upload uniforms
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
@@ -570,19 +591,19 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	}
 	shader->setUniform("u_has_ssao", has_ao);*/
 
-	if (pipeline_mode == FORWARD)
+	if (_pipeline_mode == FORWARD)
 	{
-		if (render_mode == SHOW_MULTIPASS)
+		if (rending_mode == SHOW_MULTIPASS)
 		{
 			//Multi Pass
 			renderMultiPass(shader, mesh);
 		}
-		else if (render_mode == SHOW_SINGLEPASS)
+		else if (rending_mode == SHOW_SINGLEPASS)
 		{
 			//Single Pass
 			renderSinglePass(shader, mesh);
 		}
-		else if (render_mode == SHOW_SHADOWMAP) {
+		else if (rending_mode == SHOW_SHADOWMAP) {
 			//Lights with shadows
 			if (rendering_shadowmap) {
 				//do not care about objects with transparency when creating the shadowmap
@@ -661,7 +682,7 @@ void GTR::Renderer::renderSinglePass(Shader* shader, Mesh* mesh)
 	float light_max_distance[10];
 	Vector2 light_spot_vars[10];	// x = cut off angle  |  y = spot exponent
 
-	int num_lights = lights.size();
+	int num_lights = 5; // lights.size();
 
 	for (int i = 0; i < num_lights; i++)
 	{
@@ -686,6 +707,17 @@ void GTR::Renderer::renderSinglePass(Shader* shader, Mesh* mesh)
 	shader->setUniform("u_num_lights", num_lights);
 
 	mesh->render(GL_TRIANGLES);
+}
+
+void GTR::Renderer::renderAlphaElements(std::vector< renderCall >& data, Camera* camera) {
+	
+	Shader* sh = Shader::Get("light");
+	for (int i = 0; i < data.size(); i++)
+	{
+		renderCall& rc = data[i];
+		if (rc.isAlpha)
+			renderMeshWithMaterial(rc.model, rc.mesh, rc.material, camera, sh, FORWARD, SHOW_SHADOWMAP);
+	}
 }
 
 void GTR::Renderer::renderLights(Camera* camera)
@@ -848,7 +880,7 @@ void Renderer::renderInMenu()
 			if (light_camera < lights.size() && light_camera >= 0)
 				ImGui::Text(lights[light_camera]->name.c_str());
 		}
-
+		ImGui::Checkbox("Use dithering", &use_dithering);
 		ImGui::Checkbox("Linear Correction", &linear_correction);
 		if (linear_correction)
 		{
@@ -911,7 +943,7 @@ void GTR::Renderer::resizeFBOs()
 		illumination_fbo.freeTextures();
 		illumination_fbo.create(Application::instance->window_width, 
 			Application::instance->window_height,
-			1, 			//three textures
+			1, 			//one textures
 			GL_RGB, 		//three channels
 			GL_FLOAT, //1 byte
 			true);	//depth texture
@@ -923,9 +955,9 @@ void GTR::Renderer::resizeFBOs()
 		ao_buffer->create(Application::instance->window_width, Application::instance->window_height, GL_LUMINANCE, GL_UNSIGNED_BYTE);
 	}
 
-	if (gamma_fbo.fbo_id == 0) {
+	if (gamma_fbo.fbo_id != 0) {
 		gamma_fbo.create(Application::instance->window_width, Application::instance->window_height,
-			1, 			//three textures
+			1, 			//one texture
 			GL_RGB, 		//three channels
 			GL_FLOAT, //1 byte
 			true);	//depth texture

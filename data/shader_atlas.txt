@@ -17,6 +17,7 @@ blur_ssao quad.vs ssao.fs
 gbuffers_alpha quad.vs gbuffers_alpha.fs
 gamma quad.vs gamma.fs
 tone_mapper quad.vs tone_mapper.fs
+probe basic.vs probe.fs
 
 \basic.vs
 
@@ -585,8 +586,12 @@ void main()
 	}
 
 	float occlusion = 1.0;
+	float roughness = 1.0;
+	float metalness = 0.0;
 	if(u_has_metallic_roughness){
-		float occlusion = texture( u_metallic_roughness_texture, v_uv ).x;
+		occlusion = texture( u_metallic_roughness_texture, v_uv ).x;
+		roughness = texture( u_metallic_roughness_texture, v_uv ).y;
+		metalness = texture( u_metallic_roughness_texture, v_uv ).z;
 	}
 
 	//amount of light
@@ -597,7 +602,10 @@ void main()
 		if(i < u_num_lights)
 		{
 			vec3 sublight = vec3(0.0);
-			sublight += computeLight( N, u_light_type[i], u_light_pos[i], v_world_position, u_light_vector[i], u_light_spot_vars[i].x, u_light_spot_vars[i].y, u_light_max_distance[i], u_light_intensity[i], u_light_color[i] );
+			//sublight += computeLight( N, u_light_type[i], u_light_pos[i], v_world_position, u_light_vector[i], u_light_spot_vars[i].x, u_light_spot_vars[i].y, u_light_max_distance[i], u_light_intensity[i], u_light_color[i] );
+			//PBR
+			sublight += computePBR(color.xyz, metalness, roughness, u_camera_position, N, u_light_type[i], u_light_pos[i], v_world_position, u_light_vector[i], u_light_spot_vars[i].x, u_light_spot_vars[i].y, u_light_max_distance[i], u_light_intensity[i], u_light_color[i]);
+	
 			sublight *= occlusion;
 
 			light += sublight;
@@ -1214,4 +1222,37 @@ void main() {
 	rgb = max(rgb,vec3(0.001));
 	rgb = pow( rgb, vec3( u_igamma ) );
 	FragColor = vec4( rgb, color.a );
+}
+
+\probe.fs
+
+#version 330 core
+
+in vec3 v_position;
+in vec3 v_world_position;
+in vec3 v_normal;
+
+uniform vec3 u_coeffs[9];
+
+out vec4 FragColor;
+
+void main()
+{
+	vec3 N = normalize(v_normal);
+	
+	/*
+	SH9Color sh;
+	sh.c[0] = u_coeffs[0];
+	sh.c[1] = u_coeffs[1];
+	sh.c[2] = u_coeffs[2];
+	sh.c[3] = u_coeffs[3];
+	sh.c[4] = u_coeffs[4];
+	sh.c[5] = u_coeffs[5];
+	sh.c[6] = u_coeffs[6];
+	sh.c[7] = u_coeffs[7];
+	sh.c[8] = u_coeffs[8];*/
+
+	vec4 color = vec4(u_coeffs[0], 1.0);
+
+	FragColor = color;
 }

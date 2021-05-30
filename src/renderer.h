@@ -27,7 +27,8 @@ namespace GTR {
 		SHOW_ROUGHNESS = 7,
 		SHOW_SINGLEPASS = 8,
 		SHOW_SHADOWMAP = 9,
-		SHOW_GBUFFERS = 10
+		SHOW_GBUFFERS = 10,
+		SHOW_NONE = 20
 	};
 
 	enum eRenderDeferredMode {
@@ -37,7 +38,8 @@ namespace GTR {
 
 	enum ePipelineMode {
 		FORWARD,
-		DEFERRED
+		DEFERRED,
+		NO_PIPELINE
 	};
 
 	enum eQuality {
@@ -132,6 +134,8 @@ namespace GTR {
 		FBO ssao_fbo;
 		FBO gamma_fbo;
 		Texture* color_buffer;
+		Texture* ao_buffer;
+		Texture* blur_ao_buffer;
 		eRendererCondition renderer_cond;
 		eRenderMode render_mode;
 		eRenderDeferredMode render_deferred_mode;
@@ -140,8 +144,6 @@ namespace GTR {
 		std::vector< renderCall > render_calls;
 		std::vector< LightEntity* > lights;
 		SSAOFX ssao;
-		Texture* ao_buffer;
-		Texture* blur_ao_buffer;
 		toneMapper tone_mapper;
 
 		//some flags
@@ -153,6 +155,7 @@ namespace GTR {
 		bool isRenderingBoundingBox = false;
 		bool linear_correction = false;
 		bool use_tone_mapper = false;
+		bool use_dithering = true;
 		int light_camera;	//light to show on depth camera
 
 		float computeDistanceToCamera(Matrix44 node_model, Mesh* mesh, Vector3 cam_pos);
@@ -192,12 +195,15 @@ namespace GTR {
 		void renderReconstructedScene(GTR::Scene* scene, Camera* camera);
 
 		//to render one mesh given its material and transformation matrix
-		void renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera);
+		void renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera, Shader* sh = NULL, ePipelineMode pipeline = NO_PIPELINE,eRenderMode mode = SHOW_NONE);
 
 		//how to render with lights
 		void renderMultiPass(Shader* shader, Mesh* mesh, bool sendShadowMap = false);
 		void renderSinglePass(Shader* shader, Mesh* mesh);
 		
+		//render materials with alpha on deferred
+		void renderAlphaElements(std::vector< renderCall >& data, Camera* camera);
+
 		//show debug menu using IMGUI
 		void renderInMenu();
 
