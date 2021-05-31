@@ -248,7 +248,7 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glDisable(GL_BLEND);
 	glDisable(GL_DEPTH_TEST);
-
+	
 	if (show_gbuffers)
 	{
 		renderGBuffers(camera);
@@ -257,12 +257,14 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 		ao_buffer->toViewport();
 	}
 	else {
-	//	gbuffers_fbo.depth_texture->copyTo(illumination_fbo.depth_texture);
-		
 		illumination_fbo.bind();
+		//copy the gbuffers depth buffer to the binded depth buffer in the FBO
+		gbuffers_fbo.depth_texture->copyTo(NULL);
 		glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
 		glClear(GL_COLOR_BUFFER_BIT);
+		glDisable(GL_DEPTH_TEST);
 		renderReconstructedScene(scene, camera);
+		glEnable(GL_DEPTH_TEST);
 		if(!use_dithering)
 			renderAlphaElements(data, camera);
 		illumination_fbo.unbind();
@@ -274,12 +276,13 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 			illumination_fbo.color_textures[0]->toViewport();
 		}
 		else {
+			//Gamma correction
 			if (gamma_fbo.fbo_id == 0) {
 				gamma_fbo.create(Application::instance->window_width, Application::instance->window_height,
-					1, 			//three textures
-					GL_RGB, 		//three channels
-					GL_FLOAT, //1 byte
-					true);	//depth texture
+					1, 			//one textures
+					GL_RGB, 	//three channels
+					GL_FLOAT,
+					true);	    //depth texture
 			}
 
 			gamma_fbo.bind();
@@ -578,9 +581,12 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	else if (render_mode == SHOW_ROUGHNESS)
 		type_property = 2;
 	shader->setUniform("u_type_property", type_property);
+	bool apply_linear_correction = (linear_correction && pipeline_mode == DEFERRED);
+	shader->setUniform("u_linear_correction", apply_linear_correction );
+	shader->setUniform("u_gamma", tone_mapper.gamma);
 
 	//upload material properties to the shader
-	material->uploadToShader(shader);
+	material->uploadToShader(shader, apply_linear_correction, tone_mapper.gamma);
 
 	//ssao
 	/*bool has_ao = false;
@@ -894,9 +900,9 @@ void Renderer::renderInMenu()
 			}
 		}
 	}
-	ImGui::Checkbox("Show AO", &show_ao);
 	if (pipeline_mode == DEFERRED)
 	{
+		ImGui::Checkbox("Show AO", &show_ao);
 		ImGui::Checkbox("Show GBuffers", &show_gbuffers);
 		if(show_gbuffers)
 			ImGui::Checkbox("Show Alpha GBuffers", &show_gbuffers_alpha);

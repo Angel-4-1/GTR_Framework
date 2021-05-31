@@ -430,6 +430,8 @@ uniform bool u_is_emissor;
 uniform bool u_has_metallic_roughness;
 uniform bool u_has_normal;
 uniform vec3 u_emissive_factor;
+uniform bool u_linear_correction;
+uniform float u_gamma;
 
 #include "lightUniforms"
 
@@ -466,9 +468,7 @@ void main()
 		float occlusion = texture( u_metallic_roughness_texture, v_uv ).x;
 	}
 
-	//amount of light
-	vec3 light = u_ambient_light * occlusion;
-	vec3 sublight = vec3(0.0);
+	
 	
 	float roughness = 1.0;
 	float metalness = 0.0;
@@ -478,11 +478,32 @@ void main()
 		metalness = texture( u_metallic_roughness_texture, v_uv ).z;
 	}
 
+	vec3 light_color = u_light_color;
+	vec3 ambient_light = u_ambient_light;
+	vec4 emissive = vec4(0.0);
+	if(u_linear_correction) 
+	{
+		color.xyz = pow(color.xyz,vec3(u_gamma));
+		light_color = pow(u_light_color,vec3(u_gamma));
+		ambient_light = pow(ambient_light,vec3(u_gamma));
+
+		if (u_is_emissor) 
+		{
+			emissive = texture( u_emissive_texture, v_uv );
+			emissive.xyz *= u_emissive_factor.xyz;
+			emissive.xyz = pow(emissive.xyz,vec3(u_gamma));
+		}
+	}
+
+	//amount of light
+	vec3 light = ambient_light * occlusion;
+	vec3 sublight = vec3(0.0);
+
 	//Phong
-	//sublight += computeLight( N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, u_light_color );
+	//sublight += computeLight( N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, light_color );
 	
 	//PBR
-	sublight += computePBR(color.xyz, metalness, roughness, u_camera_position, N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, u_light_color);
+	sublight += computePBR(color.xyz, metalness, roughness, u_camera_position, N, u_light_type, u_light_position, v_world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, light_color);
 	
 
 	sublight *= occlusion;
@@ -512,8 +533,11 @@ void main()
 
 	if (u_is_emissor) 
 	{
-		vec4 emissive = texture( u_emissive_texture, v_uv );
-		emissive.xyz *= u_emissive_factor.xyz;
+		if(!u_linear_correction)
+		{
+			emissive = texture( u_emissive_texture, v_uv );
+			emissive.xyz *= u_emissive_factor.xyz;
+		}
 		final_color.xyz += emissive.xyz;
 	}
 

@@ -77,10 +77,18 @@ void Material::renderInMenu()
 #endif
 }
 
-void GTR::Material::uploadToShader(Shader* shader)
+void GTR::Material::uploadToShader(Shader* shader, bool apply_linear_correction, float gamma)
 {
+	Vector4 final_color = color;
+	if (apply_linear_correction)
+	{
+		final_color.x = pow(color.x, gamma);
+		final_color.y = pow(color.x, gamma);
+		final_color.z = pow(color.y, gamma);
+		final_color.w = pow(color.w, gamma);
+	}
 	//Color
-	shader->setUniform("u_color", color);
+	shader->setUniform("u_color", final_color);
 
 	//Color texture
 	Texture* texture = NULL;

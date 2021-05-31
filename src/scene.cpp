@@ -186,8 +186,6 @@ GTR::LightEntity::LightEntity()
 	shadow_fbo = new FBO();
 	shadow_fbo->setDepthOnly(1024, 1024);
 	shadow_bias = 0.002;
-	mesh = new Mesh();
-	mesh->createPlane(50);
 	render_light = false;
 }
 
@@ -229,7 +227,6 @@ void GTR::LightEntity::configure(cJSON* json)
 		
 		if (category == "POINT") {
 			light_type = POINT;
-			mesh = Mesh::Get("data/meshes/sphere.obj", false);
 		}
 		else if (category == "SPOT") {
 			light_type = SPOT;
@@ -394,7 +391,13 @@ void GTR::LightEntity::renderShadowFBO(Shader* shader)
 //render a basic mesh on the position of the light
 void GTR::LightEntity::renderLight(Camera* camera)
 {
-
+	Mesh* mesh = new Mesh();
+	if (light_type == DIRECTIONAL) {
+		mesh->createPlane(50);
+	}
+	else {
+		mesh = Mesh::Get("data/meshes/sphere.obj", false);
+	}
 	Shader* basic_shader = Shader::getDefaultShader("flat");
 	basic_shader->enable();
 	glDisable(GL_DEPTH_TEST);

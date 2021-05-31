@@ -95,9 +95,9 @@ namespace GTR {
 
 		void init() {
 			gamma = 2.2;
-			scale = 1.0;
-			white_lum = 1.0;
-			average_lum = 1.0;
+			scale = 0.8;
+			white_lum = 1.6;
+			average_lum = 1.4;
 		}
 
 		void uploadToShader(Shader* shader) {
@@ -153,9 +153,9 @@ namespace GTR {
 		bool show_gbuffers = false;
 		bool show_gbuffers_alpha = false;
 		bool isRenderingBoundingBox = false;
-		bool linear_correction = false;
-		bool use_tone_mapper = false;
-		bool use_dithering = true;
+		bool linear_correction = true;
+		bool use_tone_mapper = true;
+		bool use_dithering = false;
 		int light_camera;	//light to show on depth camera
 
 		float computeDistanceToCamera(Matrix44 node_model, Mesh* mesh, Vector3 cam_pos);

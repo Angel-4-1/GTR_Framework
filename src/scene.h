@@ -83,7 +83,6 @@ namespace GTR {
 		bool cast_shadow = false;
 
 		//Render
-		Mesh* mesh;
 		bool render_light;
 
 		LightEntity();

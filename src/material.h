@@ -76,6 +76,6 @@ namespace GTR {
 
 		void renderInMenu();
 
-		void uploadToShader(Shader* shader);
+		void uploadToShader(Shader* shader, bool apply_linear_correction = false, float gamma = 2.2);
 	};
 };

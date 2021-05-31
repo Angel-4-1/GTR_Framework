@@ -74,7 +74,7 @@ Application::Application(int window_width, int window_height, SDL_Window* window
 	int counter = 0;
 	for (int i = 0; i < 5; i++) {
 		for (int j = 0; j < 5; j++) {
-			Vector3 pos = Vector3((200 * i) - 300, 50, (200 * j) - 300);
+			Vector3 pos = Vector3((400 * i) - 600, 50, (400 * j) - 600);
 			Vector3 col = Vector3((float)rand() / RAND_MAX, (float)rand() / RAND_MAX, (float)rand() / RAND_MAX);
 			GTR::LightEntity* light = new GTR::LightEntity();
 			light->model.setIdentity();
@@ -82,7 +82,6 @@ Application::Application(int window_width, int window_height, SDL_Window* window
 			light->color = col;
 			light->intensity = 2.5;
 			light->name = "randomPoint" + std::to_string(counter);
-			light->mesh = Mesh::Get("data/meshes/sphere.obj", false);
 			scene->entities.push_back(light); light->scene = scene;
 			scene->lights.push_back((GTR::LightEntity*)light);
 			counter++;
