@@ -10,7 +10,10 @@ GTR::Scene* GTR::Scene::instance = NULL;
 GTR::Scene::Scene()
 {
 	instance = this;
+	reflection = new GTR::ReflectionEntity();
+	reflection->scene = this;
 }
+
 
 void GTR::Scene::clear()
 {
@@ -31,6 +34,32 @@ void GTR::Scene::addEntity(BaseEntity* entity)
 	{
 		lights.push_back((GTR::LightEntity*)entity);
 	}
+
+	if (entity->entity_type == IRRADIANCE)
+	{
+		irr = ((GTR::IrradianceEntity*)entity);
+	}
+
+	if (entity->entity_type == REFLECTION_PROBE)
+	{
+		reflect_probes.push_back( (GTR::sReflectionProbe*)entity );
+	}
+}
+
+void GTR::Scene::updatePrefabNearestReflectionProbe()
+{
+	std::cout << "Updating nearest reflection probes for each prefab ... ";
+	for (int i = 0; i < entities.size(); i++)
+	{
+		BaseEntity* ent = entities[i];
+		if (ent->entity_type == PREFAB)
+		{
+			PrefabEntity* pent = (GTR::PrefabEntity*)ent;
+			if (pent->prefab)
+				pent->updateNearestReflectionProbe();
+		}
+	}
+	std::cout << "Finished" << std::endl;
 }
 
 bool GTR::Scene::load(const char* filename)
@@ -57,6 +86,7 @@ bool GTR::Scene::load(const char* filename)
 	//read global properties
 	background_color = readJSONVector3(json, "background_color", background_color);
 	ambient_light = readJSONVector3(json, "ambient_light", ambient_light);
+	environment_file = readJSONString(json, "environment", "");
 	main_camera.eye = readJSONVector3(json, "camera_position", main_camera.eye);
 	main_camera.center = readJSONVector3(json, "camera_target", main_camera.center);
 	main_camera.fov = readJSONNumber(json, "camera_fov", main_camera.fov);
@@ -127,6 +157,12 @@ GTR::BaseEntity* GTR::Scene::createEntity(std::string type)
 		return new GTR::PrefabEntity();
 	else if (type == "LIGHT")
 		return new GTR::LightEntity();
+	else if (type == "IRRADIANCE")
+		return new GTR::IrradianceEntity();
+	else if (type == "DECAL")
+		return new GTR::DecalEntity();
+	else if (type == "REFLECTION_PROBE")
+		return new GTR::sReflectionProbe();
 	return NULL;
 }
 
@@ -142,11 +178,11 @@ void GTR::BaseEntity::renderInMenu()
 
 
 
-
 GTR::PrefabEntity::PrefabEntity()
 {
 	entity_type = PREFAB;
 	prefab = NULL;
+	nearest_reflection_probe = NULL;
 }
 
 void GTR::PrefabEntity::configure(cJSON* json)
@@ -158,12 +194,50 @@ void GTR::PrefabEntity::configure(cJSON* json)
 	}
 }
 
+// Calculate distance between two 3D points using the pythagoras theorem
+float distanceToProbe(float x1, float y1, float z1, float x2, float y2, float z2)
+{
+	return sqrt(pow(x2 - x1, 2.0) + pow(y2 - y1, 2.0) + pow(z2 - z1, 2.0));
+}
+
+float computeDistanceToProbe(Vector3 center, Vector3 probe_pos) 
+{
+	return distanceToProbe(center.x, center.y, center.z, probe_pos.x, probe_pos.y, probe_pos.z);
+}
+
+void GTR::PrefabEntity::updateNearestReflectionProbe()
+{
+	int index_nearest = -1;
+	float near_distance = 99999;
+	float actual_distance = 0;
+	for (int i = 0; i < scene->reflect_probes.size(); i++)
+	{
+		sReflectionProbe* probe = scene->reflect_probes[i];
+		actual_distance = computeDistanceToProbe(model.getTranslation(), probe->model.getTranslation());
+		if (actual_distance < near_distance)
+		{
+			near_distance = actual_distance;
+			actual_distance = 0;
+			index_nearest = i;
+		}
+	}
+
+	if (index_nearest != -1 && index_nearest < scene->reflect_probes.size())
+	{
+		nearest_reflection_probe = scene->reflect_probes[index_nearest];
+	}
+}
+
 void GTR::PrefabEntity::renderInMenu()
 {
 	BaseEntity::renderInMenu();
 
 #ifndef SKIP_IMGUI
 	ImGui::Text("filename: %s", filename.c_str()); // Edit 3 floats representing a color
+	if (nearest_reflection_probe != NULL)
+	{
+		ImGui::Text("Nearest reflection probe: %s", nearest_reflection_probe->name.c_str());
+	}
 	if (prefab && ImGui::TreeNode(prefab, "Prefab Info"))
 	{
 		prefab->root.renderInMenu();
@@ -187,6 +261,7 @@ GTR::LightEntity::LightEntity()
 	shadow_fbo->setDepthOnly(1024, 1024);
 	shadow_bias = 0.002;
 	render_light = false;
+	is_volumetric = false;
 }
 
 void GTR::LightEntity::uploadToShader(Shader* shader, bool sendShadowMap)
@@ -298,6 +373,11 @@ void GTR::LightEntity::configure(cJSON* json)
 		model.rotate(angle * DEG2RAD, Vector3(0, 1, 0));
 		updateCamera();
 	}
+
+	if (cJSON_GetObjectItem(json, "volumetric"))
+	{
+		is_volumetric = (bool)cJSON_GetObjectItem(json, "volumetric")->valueint;
+	}
 	
 }
 
@@ -317,11 +397,12 @@ void GTR::LightEntity::renderInMenu()
 	}
 	ImGui::Combo("Light Type", (int*)&light_type, "DIRECTIONAL\0SPOT\0POINT", 3);
 	ImGui::ColorEdit3("Color", color.v);
-	ImGui::SliderFloat("Intensity", &intensity, 0, 10);
+	ImGui::SliderFloat("Intensity", &intensity, 0, 100);
 	changed |= ImGui::SliderFloat3("Target Position", &target.x, -1000, 1000);
 	ImGui::SliderFloat("Max distance", &max_distance, 0, 5000);
 	ImGui::Checkbox("Cast Shadow", &cast_shadow);
 	ImGui::SliderFloat("Shadow Bias", &shadow_bias, 0, 0.05);
+	ImGui::Checkbox("Volumetric", &is_volumetric);
 	if (light_type == SPOT)
 	{
 		ImGui::SliderFloat("Cone angle", &cone_angle, 0, 89);
@@ -411,4 +492,310 @@ void GTR::LightEntity::renderLight(Camera* camera)
 	mesh->render(GL_TRIANGLES);
 	glEnable(GL_DEPTH_TEST);
 	basic_shader->disable();
+}
+
+GTR::IrradianceEntity::IrradianceEntity()
+{
+	entity_type = IRRADIANCE;
+	dimensions[0] = 1;
+	dimensions[1] = 1;
+	dimensions[2] = 1;
+	scale = 1;
+	size = 1;
+
+
+	delta = (end_pos - start_pos);
+	delta.x /= (dim.x - 1);
+	delta.y /= (dim.y - 1);
+	delta.z /= (dim.z - 1);
+}
+
+void GTR::IrradianceEntity::configure(cJSON* json)
+{
+	if (cJSON_GetObjectItem(json, "position"))
+	{
+		model.setIdentity();
+		Vector3 position = readJSONVector3(json, "position", Vector3());
+		model.translate(position.x, position.y, position.z);
+	}
+
+	if (cJSON_GetObjectItem(json, "scale"))
+	{
+		scale = cJSON_GetObjectItem(json, "scale")->valuedouble;
+	}
+
+	if (cJSON_GetObjectItem(json, "size"))
+	{
+		size = cJSON_GetObjectItem(json, "size")->valuedouble;
+	}
+
+	if (cJSON_GetObjectItem(json, "dimensions"))
+	{
+		Vector3 dim = readJSONVector3(json, "dimensions", Vector3(1,1,1));
+		dimensions[0] = dim.x;
+		dimensions[1] = dim.y;
+		dimensions[2] = dim.z;
+	}
+}
+
+void GTR::IrradianceEntity::init(Vector3 dim, float _scale, float _size) {
+	dimensions[0] = dim.x;
+	dimensions[1] = dim.y;
+	dimensions[2] = dim.z;
+	scale = _scale;
+	size = _size;
+	model.setIdentity();
+}
+
+void GTR::IrradianceEntity::render(Shader* shader, Camera* camera)
+{
+	//Mesh* mesh = Mesh::Get("data/meshes/sphere.obj", false);
+	//Shader* basic_shader = Shader::getDefaultShader("flat");
+	//basic_shader->enable();
+	//glDisable(GL_DEPTH_TEST);
+	//basic_shader->setUniform("u_color", Vector4(1.0, 1.0, 1.0, 1.0));
+
+	for (int i = 0; i < probes.size(); i++)
+	{
+		probes[i].render(camera);
+	}
+
+	//glEnable(GL_DEPTH_TEST);
+	//basic_shader->disable();
+}
+
+void GTR::IrradianceEntity::placeProbes()
+{
+	probes.clear();
+	Vector3 irr_pos = model.getTranslation();
+
+	//create the probes
+	//for (int x = 0; x < dimensions[0]; x++) {
+	//	for (int y = 0; y < dimensions[1]; y++) {
+	//		for (int z = 0; z < dimensions[2]; z++) {
+	//			Vector3 position = Vector3( (x * scale) + irr_pos.x, (y * scale) + irr_pos.y, (z * scale) + irr_pos.z);
+	//			
+	//			sProbe probe;
+	//			//initialize
+	//			memset(&probe, 0, sizeof(probe));
+	//			probe.sh.coeffs[0].set(1, 0, 0);
+	//			probe.sh.coeffs[1].set(0, 1, 0);
+	//			probe.sh.coeffs[2].set(0, 0, 1);
+	//			probe.pos.set(position.x, position.y, position.z);
+	//			probe.local.set(x, y, z);
+	//			probe.index = x + y * dimensions[0] + z * dimensions[0] * dimensions[1];
+	//			probe.size = size;
+
+	//			probes.push_back(probe);
+	//		}
+	//	}
+	//}
+	
+	//for (int z = 0; z < dimensions[2]; z++) {
+	//	for (int y = 0; y < dimensions[1]; y++) {
+	//		for (int x = 0; x < dimensions[0]; x++) {
+	//			Vector3 position = Vector3( (x * scale) + irr_pos.x, (y * scale) + irr_pos.y, (z * scale) + irr_pos.z);
+	//			
+	//			sProbe probe;
+	//			//initialize
+	//			memset(&probe, 0, sizeof(probe));
+	//			probe.sh.coeffs[0].set(1, 0, 0);
+	//			probe.sh.coeffs[1].set(0, 1, 0);
+	//			probe.sh.coeffs[2].set(0, 0, 1);
+	//			probe.pos.set(position.x, position.y, position.z);
+	//			probe.local.set(x, y, z);
+	//			probe.index = x + y * dimensions[0] + z * dimensions[0] * dimensions[1];
+	//			probe.size = size;
+
+	//			probes.push_back(probe);
+	//		}
+	//	}
+	//}
+
+	for (int z = 0; z < dim.z; ++z)
+		for (int y = 0; y < dim.y; ++y)
+			for (int x = 0; x < dim.x; ++x)
+			{
+				sProbe p;
+				//initialize
+				memset(&p, 0, sizeof(p));
+				p.sh.coeffs[0].set(1, 0, 0);
+				p.sh.coeffs[2].set(0, 0, 1);
+				p.local.set(x, y, z);
+
+				//index in the linear array
+				p.index = x + y * dim.x + z * dim.x * dim.y;
+				p.size = size;
+				//and its position
+				p.pos = start_pos + delta * Vector3(x, y, z);
+				probes.push_back(p);
+			}
+}
+
+void GTR::IrradianceEntity::renderInMenu()
+{
+#ifndef SKIP_IMGUI
+	bool changed = false;
+	ImGuiMatrix44(model, "Model");
+	changed |= ImGui::SliderFloat("Scale", &scale, 0, 500);
+	changed |= ImGui::SliderFloat("Size", &size, 0, 20);
+	changed |= ImGui::SliderInt3("Dimensions", &dimensions[0], 1, 50);
+	changed |= ImGui::Button("Update values");
+	if (changed)
+	{
+		placeProbes();
+	}
+#endif
+}
+
+void GTR::IrradianceEntity::uploadToShader(Shader* shader)
+{
+	//Vector3 irr_start = model.getTranslation();
+	//shader->setUniform("u_irr_start", irr_start);
+	//Vector3 irr_end = Vector3((dimensions[0] * scale) + irr_start.x,
+	//	(dimensions[1] * scale) + irr_start.y,
+	//	(dimensions[2] * scale) + irr_start.z);
+	////irr_end = probes[probes.size() - 1].pos;
+	//shader->setUniform("u_irr_end", irr_end);
+	//shader->setUniform("u_irr_normal_distance", 1);
+	//Vector3 irr_dim = Vector3(dimensions[0], dimensions[1], dimensions[2]);
+	//shader->setUniform("u_irr_dims", irr_dim);
+	//int num_probes = probes.size(); //dimensions[0] * dimensions[1] * dimensions[2];
+	//shader->setUniform("u_num_probes", num_probes);
+	//Vector3 delta = (irr_end - irr_start);
+	////shader->setUniform("u_irr_delta", delta);
+	//shader->setUniform("u_irr_delta", Vector3(scale,scale,scale));
+
+
+	shader->setUniform("u_irr_end", end_pos);
+	shader->setUniform("u_irr_start", start_pos);
+	shader->setUniform("u_irr_normal_distance", 1);
+	shader->setUniform("u_irr_delta", delta);
+	shader->setUniform("u_irr_dims", dim);
+	shader->setUniform("u_num_probes", (float)probes.size());
+}
+
+void GTR::sProbe::render(Camera* cam)
+{
+	Camera* camera = cam;
+	Shader* shader = Shader::Get("probe");
+	Mesh* mesh = Mesh::Get("data/meshes/sphere.obj", false);
+
+	glEnable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
+
+	Matrix44 model;
+	model.setTranslation(pos.x, pos.y, pos.z);
+	model.scale(size, size, size);
+
+	shader->enable();
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	shader->setUniform("u_camera_position", camera->eye);
+	shader->setUniform("u_model", model);
+	shader->setUniform3Array("u_coeffs", sh.coeffs[0].v, 9);
+
+	mesh->render(GL_TRIANGLES);
+	shader->disable();
+}
+
+GTR::DecalEntity::DecalEntity()
+{
+	entity_type = DECAL;
+	albedo = NULL;
+}
+
+void GTR::DecalEntity::configure(cJSON* json)
+{
+	std::string file = readJSONString(json, "albedo", "");
+	if (file.size())
+		albedo = Texture::Get((std::string("data/") + file).c_str());
+}
+
+GTR::sReflectionProbe::sReflectionProbe()
+{
+	entity_type = REFLECTION_PROBE;
+	size = 10;
+
+	cubemap = new Texture();
+	cubemap->createCubemap(
+		512, 512,
+		NULL,
+		GL_RGB, GL_UNSIGNED_INT, false);
+}
+
+void GTR::sReflectionProbe::configure(cJSON* json)
+{
+	if (cJSON_GetObjectItem(json, "position"))
+	{
+		model.setIdentity();
+		Vector3 position = readJSONVector3(json, "position", Vector3());
+		model.translate(position.x, position.y, position.z);
+	}
+
+	if (cJSON_GetObjectItem(json, "size"))
+	{
+		size = cJSON_GetObjectItem(json, "size")->valuedouble;
+	}
+}
+
+GTR::ReflectionEntity::ReflectionEntity()
+{
+	entity_type = REFLECTION_ENTITY;
+	size = 10;
+}
+
+void GTR::ReflectionEntity::placeProbes()
+{
+	reflection_probes.clear();
+	
+	for (int i = 0; i < scene->reflect_probes.size(); i++)
+	{
+		sReflectionProbe* probe = scene->reflect_probes[i];
+		reflection_probes.push_back(probe);
+	}
+}
+
+void GTR::ReflectionEntity::render(Camera* camera)
+{
+	Mesh* mesh = Mesh::Get("data/meshes/sphere.obj", false);
+	Shader* shader = Shader::Get("reflection");
+	shader->enable();
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	shader->setUniform("u_camera_position", camera->eye);
+
+	glEnable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
+
+	for (int i = 0; i < reflection_probes.size(); i++)
+	{
+		sReflectionProbe* probe = reflection_probes[i];
+		
+		Matrix44 model;
+		Vector3 pos = probe->model.getTranslation();
+		model.setTranslation(pos.x, pos.y, pos.z);
+		model.scale(probe->size, probe->size, probe->size);
+		shader->setUniform("u_model", model);
+		shader->setTexture("u_texture", probe->cubemap, 1);
+		mesh->render(GL_TRIANGLES);
+	}
+
+	glEnable(GL_CULL_FACE);
+	glEnable(GL_DEPTH_TEST);
+}
+
+void GTR::ReflectionEntity::configure(cJSON* json)
+{
+	if (cJSON_GetObjectItem(json, "position"))
+	{
+		model.setIdentity();
+		Vector3 position = readJSONVector3(json, "position", Vector3());
+		model.translate(position.x, position.y, position.z);
+	}
+
+	if (cJSON_GetObjectItem(json, "size"))
+	{
+		size = cJSON_GetObjectItem(json, "size")->valuedouble;
+	}
 }

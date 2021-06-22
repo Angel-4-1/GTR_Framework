@@ -1,10 +1,26 @@
 {
   "background_color": [ 0.01, 0.01, 0.1 ],
   "ambient_light": [ 0.1, 0.1, 0.2 ],
+  "environment": "night.hdre",
   "camera_position": [ -300, 90, -150 ],
   "camera_target": [ 0, 40, 0 ],
   "camera_fov": 60,
   "entities": [
+    {
+      "name": "irr",
+      "type": "IRRADIANCE",
+      "position": [ -80, 40, -360 ],
+      "dimensions": [ 5, 5, 5 ],
+      "scale": 50,
+      "size": 10
+    },
+    {
+      "name": "decal",
+      "type": "DECAL",
+      "albedo": "textures/damageFloor.png",
+      "position": [ -180, 10, -9 ],
+      "scale": [ 100, 100, 100 ]
+    },
     {
       "name": "floor",
       "type": "PREFAB",
@@ -66,7 +82,8 @@
       "cone_exp": 60,
       "light_type": "SPOT",
       "cast_shadows": true,
-      "shadow_bias": 0.001
+      "shadow_bias": 0.001,
+      "volumetric": true
     },
     {
       "name": "pointlight",
@@ -91,15 +108,44 @@
     {
       "name": "moonlight",
       "type": "LIGHT",
-      "position": [ 150, 300, 50 ],
-      "target": [ -80, 0, -50 ],
+      "position": [ 615, 760, 130 ],
+      "target": [ 565, 507, -14 ],
       "color": [ 0.1, 0.2, 0.4 ],
       "intensity": 1.5,
-      "area_size": 1500,
+      "area_size": 2800,
       "max_dist": 1000,
       "cast_shadows": true,
       "shadow_bias": 0.003,
       "light_type": "DIRECTIONAL"
+    },
+    {
+      "name": "sponza",
+      "type": "PREFAB",
+      "filename": "prefabs/sponza/sponza.gltf",
+      "position": [ -200, 0, -900 ],
+      "scale" : [50, 50, 50]
+    },
+    {
+      "name": "sponzapointlight",
+      "type": "LIGHT",
+      "position": [ 118, 68, -915 ],
+      "angle": 0,
+      "color": [ 0.9, 0.4, 0.3 ],
+      "intensity": 11,
+      "max_dist": 350,
+      "light_type": "POINT"
+    },
+    {
+      "name": "reflection",
+      "type": "REFLECTION_PROBE",
+      "position": [ -80, 40, -200 ],
+      "size": 10
+    },
+    {
+      "name": "reflection2",
+      "type": "REFLECTION_PROBE",
+      "position": [ -80, 40, 50 ],
+      "size": 10
     }
   ]
 }

@@ -42,7 +42,8 @@ float texelSolidAngle(float aU, float aV, float width, float height) {
 
 // give me a cubemap, its size and number of channels
 // and i'll give you spherical harmonics
-SphericalHarmonics computeSH( FloatImage images[], bool degamma ) {
+SphericalHarmonics computeSH(FloatImage images[], bool degamma) {
+    assert(images[0].width == images[0].height && images[0].width != 0 && "Image is not square");
     int size = images[0].width;
     int channels = 3;
     SphericalHarmonics sh;
@@ -85,7 +86,7 @@ SphericalHarmonics computeSH( FloatImage images[], bool degamma ) {
             for (int x = 0; x < size; x++) {
                 Vector3 texelVect = cubeMapVecs[index][y * size + x];
                 float weight = texelSolidAngle(x, y, size, size);
-                    // forsyths weights
+                // forsyths weights
                 float weight1 = weight * 4 / 17;
                 float weight2 = weight * 8 / 17;
                 float weight3 = weight * 15 / 17;
@@ -96,10 +97,10 @@ SphericalHarmonics computeSH( FloatImage images[], bool degamma ) {
                 float dy = texelVect[1];
                 float dz = texelVect[2];
 
-                Vector3 value = face.getPixel(x,y).xyz();
+                Vector3 value = face.getPixel(x, y).xyz();
                 if (gammaCorrect)
                     value = Vector3(pow(value.x, 2.2), pow(value.y, 2.2), pow(value.z, 2.2));
-                    
+
                 sh.coeffs[0] += value * weight1;
                 sh.coeffs[1] += value * weight2 * dy;
                 sh.coeffs[2] += value * weight2 * dz;

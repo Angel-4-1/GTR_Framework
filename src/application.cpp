@@ -10,6 +10,7 @@
 #include "prefab.h"
 #include "gltf_loader.h"
 #include "renderer.h"
+#include "extra/hdre.h"
 
 #include <cmath>
 #include <string>
@@ -87,7 +88,12 @@ Application::Application(int window_width, int window_height, SDL_Window* window
 			counter++;
 		}
 	}
-	
+
+	scene->environment_file = "data/" + scene->environment_file;
+	scene->environment = GTR::CubemapFromHDRE(scene->environment_file.c_str());
+
+	scene->updatePrefabNearestReflectionProbe();
+
 	//update camera values after having read the file
 	camera->lookAt(scene->main_camera.eye, scene->main_camera.center, Vector3(0, 1, 0));
 	camera->fov = scene->main_camera.fov;
@@ -320,6 +326,10 @@ void Application::onKeyDown( SDL_KeyboardEvent event )
 			camera->lookAt(scene->main_camera.eye, scene->main_camera.center, Vector3(0, 1, 0));
 			camera->fov = scene->main_camera.fov;
 			break;
+		case SDLK_i: renderer->updateIrradianceCache(scene); break;
+		case SDLK_v: renderer->freeze_prev_vp = !renderer->freeze_prev_vp; break;
+		case SDLK_r: renderer->updateReflectionProbes(GTR::Scene::instance); break;
+		case SDLK_p: GTR::Scene::instance->updatePrefabNearestReflectionProbe(); break;
 	}
 }
 

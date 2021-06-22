@@ -4,6 +4,7 @@
 
 //forward declarations
 class Camera;
+class HDRE;
 
 namespace GTR {
 
@@ -49,6 +50,13 @@ namespace GTR {
 		ULTRA
 	};
 
+	enum ePostFX {
+		FX_MOTION_BLUR,
+		FX_PIXELATED,
+		FX_BLUR,
+		FX_DEPTH_OF_FIELD
+	};
+
 	class renderCall {
 	public:
 		Mesh* mesh;
@@ -56,6 +64,7 @@ namespace GTR {
 		Matrix44 model;
 		float distance_to_camera;
 		bool isAlpha;	// has transparency?
+		sReflectionProbe* nearest_reflection_probe;
 
 		renderCall() {
 			isAlpha = false;
@@ -130,24 +139,34 @@ namespace GTR {
 		FBO fbo;
 		FBO shadow_singlepass;
 		FBO gbuffers_fbo;
+		FBO decals_fbo;
 		FBO illumination_fbo;
 		FBO ssao_fbo;
 		FBO gamma_fbo;
+		FBO* irr_fbo;
+		FBO blur_fbo;
+		FBO reflection_fbo;
+
 		Texture* color_buffer;
 		Texture* ao_buffer;
 		Texture* blur_ao_buffer;
+		Texture* probes_texture;
+
 		eRendererCondition renderer_cond;
 		eRenderMode render_mode;
 		eRenderDeferredMode render_deferred_mode;
 		ePipelineMode pipeline_mode;
 		eQuality quality;
+		ePostFX post_fx;
 		std::vector< renderCall > render_calls;
 		std::vector< LightEntity* > lights;
+		IrradianceEntity* irr;
+		ReflectionEntity* reflection_entity;
 		SSAOFX ssao;
 		toneMapper tone_mapper;
 
 		//some flags
-		bool show_ao;
+		bool show_ao = false;
 		bool rendering_shadowmap = false;
 		bool show_depth_camera = false;
 		bool show_gbuffers = false;
@@ -156,7 +175,21 @@ namespace GTR {
 		bool linear_correction = true;
 		bool use_tone_mapper = true;
 		bool use_dithering = false;
+		bool apply_irradiance = false;
+		bool use_irradiance = false;
+		bool show_probes = true;
+		bool apply_skybox = true;
+		bool show_irradiance_coeffs = false;
+		bool freeze_prev_vp = false;
+		bool apply_post_fx = false;
+		bool show_reflection_probes = true;
 		int light_camera;	//light to show on depth camera
+
+		//PostFX
+		int pixel_size = 5;
+		int blur_size = 5;
+
+		Matrix44 vp_previous;
 
 		float computeDistanceToCamera(Matrix44 node_model, Mesh* mesh, Vector3 cam_pos);
 
@@ -171,18 +204,18 @@ namespace GTR {
 		void createShadowMapsUsingForward(Scene* scene, Camera* camera);
 
 		//obtain the shader to use
-		Shader* getShader();
+		Shader* getShader(ePipelineMode pm, eRenderMode rm);
 
 		//create the render calls + sort them 
 		void createRenderCalls(GTR::Scene* scene, Camera* camera);
 	
 		//to render a whole prefab (with all its nodes)
-		void prefabToNode(const Matrix44& model, GTR::Prefab* prefab, Camera* camera);
+		void prefabToNode(const Matrix44& model, GTR::Prefab* prefab, Camera* camera, sReflectionProbe* _nearest_reflection_probe = NULL);
 
 		//to render one node from the prefab and its children
-		void nodeToRenderCall(const Matrix44& model, GTR::Node* node, Camera* camera);
+		void nodeToRenderCall(const Matrix44& model, GTR::Node* node, Camera* camera, sReflectionProbe* _nearest_reflection_probe = NULL);
 
-		void renderForward(GTR::Scene* scene, std::vector< renderCall >& data, Camera* camera);
+		void renderForward(GTR::Scene* scene, std::vector< renderCall >& data, Camera* camera, ePipelineMode pipeline = NO_PIPELINE, eRenderMode mode = SHOW_NONE);
 		void renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data, Camera* camera);
 
 		//show gBuffers
@@ -193,12 +226,13 @@ namespace GTR {
 
 		//use gBufferes to reconstruct the scene
 		void renderReconstructedScene(GTR::Scene* scene, Camera* camera);
+		void renderVolumetricLights(GTR::Scene* scene, Camera* camera);
 
 		//to render one mesh given its material and transformation matrix
-		void renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera, Shader* sh = NULL, ePipelineMode pipeline = NO_PIPELINE,eRenderMode mode = SHOW_NONE);
+		void renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Material* material, Camera* camera, Shader* sh = NULL, ePipelineMode pipeline = NO_PIPELINE,eRenderMode mode = SHOW_NONE, sReflectionProbe* _nearest_reflection_probe = NULL);
 
 		//how to render with lights
-		void renderMultiPass(Shader* shader, Mesh* mesh, bool sendShadowMap = false);
+		void renderMultiPass(Shader* shader, Mesh* mesh, bool sendShadowMap = false, sReflectionProbe* _nearest_reflection_probe = NULL);
 		void renderSinglePass(Shader* shader, Mesh* mesh);
 		
 		//render materials with alpha on deferred
@@ -213,7 +247,16 @@ namespace GTR {
 		void changeQualityFBO();
 
 		void resizeFBOs();
-		
+		void renderSkybox(Texture* skybox, Camera* camera);
+
+		void updateIrradianceCache(GTR::Scene* scene);
+		void extractProbe(GTR::Scene* scene, sProbe& p);
+		void storeIrradianceToTexture();
+		void updateReflectionProbes(GTR::Scene* scene);
+
+		void renderDecals(GTR::Scene* scene, Camera* camera);
+
+		void renderPostFX(Camera* camera, Texture* texture);
 	};
 
 	Texture* CubemapFromHDRE(const char* filename);

@@ -18,6 +18,17 @@ gbuffers_alpha quad.vs gbuffers_alpha.fs
 gamma quad.vs gamma.fs
 tone_mapper quad.vs tone_mapper.fs
 probe basic.vs probe.fs
+skybox basic.vs skybox.fs
+reflection basic.vs reflection.fs
+volume_direct quad.vs volume_direct.fs
+volume_direct_ws basic.vs volume_direct.fs
+decals basic.vs decals.fs
+irradiance basic.vs irradiance.fs
+//PostFX
+motion_blur quad.vs motion_blur.fs
+pixelated quad.vs pixelated.fs
+blur quad.vs blur.fs
+dof quad.vs dof.fs
 
 \basic.vs
 
@@ -421,11 +432,15 @@ uniform sampler2D u_normal_texture;
 uniform sampler2D u_emissive_texture;
 uniform sampler2D u_metallic_roughness_texture;
 uniform sampler2D u_shadowmap_texture;
+uniform samplerCube u_environment_texture;
+uniform samplerCube u_reflection_texture;
 
+uniform bool u_last_pass;
 uniform float u_time;
 uniform float u_alpha_cutoff;
 uniform vec3 u_camera_position;
 
+uniform bool u_has_environment;
 uniform bool u_is_emissor;
 uniform bool u_has_metallic_roughness;
 uniform bool u_has_normal;
@@ -468,8 +483,6 @@ void main()
 		float occlusion = texture( u_metallic_roughness_texture, v_uv ).x;
 	}
 
-	
-	
 	float roughness = 1.0;
 	float metalness = 0.0;
 	if(u_has_metallic_roughness) 
@@ -539,6 +552,21 @@ void main()
 			emissive.xyz *= u_emissive_factor.xyz;
 		}
 		final_color.xyz += emissive.xyz;
+	}
+
+	vec3 V = v_world_position - u_camera_position;
+	vec3 R = reflect( V, N );
+	//texture( text, uv, mipmap)
+	//textureLod = use always the same mipmap
+	//final_color.xyz += textureLod( u_environment_texture, R, roughness * 5.0 ).xyz * metalness;
+	//sumar a la specular la cantidad de luz del reflejo
+	//en forward la ultima pasada pintar el reflejo solo la ultima pasada
+	//en deferred hacerlo solo en la iteracion del quad
+	//fase de gbuffers ademas de la emissiva guardar la cantidad de luz del entorno
+
+	if(u_last_pass)
+	{
+		final_color.xyz += textureLod( u_reflection_texture, R, roughness * 3.0 ).xyz * metalness;
 	}
 
 	FragColor = final_color;
@@ -695,13 +723,16 @@ uniform vec4 u_color;
 uniform float u_time;
 uniform float u_alpha_cutoff;
 uniform vec2 u_camera_nearfar;
+uniform vec3 u_camera_position;
 
 uniform sampler2D u_texture;
 uniform sampler2D u_emissive_texture;
 uniform sampler2D u_metallic_roughness_texture;
 uniform sampler2D u_normal_texture;
 uniform sampler2D u_ssao_texture;
+uniform samplerCube u_reflection_texture;
 
+uniform bool u_last_pass;
 uniform bool u_apply_dithering;
 uniform bool u_has_normal;
 uniform bool u_has_metallic_roughness;
@@ -784,6 +815,12 @@ void main()
 		emissive = texture( u_emissive_texture, v_uv ).xyz;
 		emissive.xyz *= u_emissive_factor.xyz;
 	}
+	
+	if(u_last_pass) {
+		vec3 V = v_world_position - u_camera_position;
+		vec3 R = reflect( V, N );
+		emissive.xyz += textureLod( u_reflection_texture, R, metallic.y * 1.0 ).xyz * metallic.z;
+	}
 
 	float occlusion = 0.0;
 	//get occlusion from ssao texture
@@ -802,6 +839,43 @@ void main()
 	ExtraColor = vec4(emissive, metallic.z);
 }
 
+\SHfunctions
+const float Pi = 3.141592654;
+const float CosineA0 = Pi;
+const float CosineA1 = (2.0 * Pi) / 3.0;
+const float CosineA2 = Pi * 0.25;
+struct SH9 { float c[9]; }; //to store weights
+struct SH9Color { vec3 c[9]; }; //to store colors
+
+void SHCosineLobe(in vec3 dir, out SH9 sh) //SH9
+{
+	// Band 0
+	sh.c[0] = 0.282095 * CosineA0;
+	// Band 1
+	sh.c[1] = 0.488603 * dir.y * CosineA1; 
+	sh.c[2] = 0.488603 * dir.z * CosineA1;
+	sh.c[3] = 0.488603 * dir.x * CosineA1;
+	// Band 2
+	sh.c[4] = 1.092548 * dir.x * dir.y * CosineA2;
+	sh.c[5] = 1.092548 * dir.y * dir.z * CosineA2;
+	sh.c[6] = 0.315392 * (3.0 * dir.z * dir.z - 1.0) * CosineA2;
+	sh.c[7] = 1.092548 * dir.x * dir.z * CosineA2;
+	sh.c[8] = 0.546274 * (dir.x * dir.x - dir.y * dir.y) * CosineA2;
+}
+
+vec3 ComputeSHIrradiance(in vec3 normal, in SH9Color sh)
+{
+	// Compute the cosine lobe in SH, oriented about the normal direction
+	SH9 shCosine;
+	SHCosineLobe(normal, shCosine);
+	// Compute the SH dot product to get irradiance
+	vec3 irradiance = vec3(0.0);
+	for(int i = 0; i < 9; ++i)
+		irradiance += sh.c[i] * shCosine.c[i];
+
+	return irradiance;
+}
+
 \deferred.fs
 
 #version 330 core
@@ -814,6 +888,7 @@ uniform sampler2D u_extra_texture;
 uniform sampler2D u_depth_texture;
 uniform sampler2D u_shadowmap_texture;
 uniform sampler2D u_ssao_texture;
+uniform samplerCube u_environment_texture;
 
 uniform vec2 u_iRes;
 uniform vec3 u_camera_position;
@@ -824,11 +899,55 @@ uniform bool u_linear_correction;
 
 uniform float u_gamma;
 uniform mat4 u_inverse_viewprojection;
+uniform bool u_has_environment;
+uniform bool u_apply_irradiance;
+uniform sampler2D u_probes_texture;
+uniform vec3 u_irr_start;
+uniform vec3 u_irr_end;
+uniform float u_irr_normal_distance;
+uniform vec3 u_irr_dims;
+uniform int u_num_probes;
+uniform vec3 u_irr_delta;
 
 #include "lightUniforms"
 #include "lightFunctions"
+#include "SHfunctions"
 
 out vec4 FragColor;
+
+vec3 computeIrradiance(vec3 world_pos, vec3 N) {
+	//computing nearest probe index based on world position
+	vec3 irr_range = u_irr_end - u_irr_start;
+	vec3 irr_local_pos = clamp( world_pos - u_irr_start + N * u_irr_normal_distance, vec3(0.0), irr_range );
+	//vec3 irr_range = u_irr_start - u_irr_end;
+	//vec3 irr_local_pos = clamp( world_pos - u_irr_end + N * u_irr_normal_distance, vec3(0.0), irr_range );
+
+	//convert from world pos to grid pos
+	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
+
+	//round values as we cannot fetch between rows for now
+	vec3 local_indices = round( irr_norm_pos );
+
+	//compute in which row is the probe stored
+	float row = local_indices.x + local_indices.y * u_irr_dims.x + local_indices.z * u_irr_dims.x * u_irr_dims.y;
+
+	//find the UV.y coord of that row in the probes texture
+	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
+
+	SH9Color sh;
+
+	//fill the coefficients
+	const float d_uvx = 1.0 / 9.0;
+	for(int i = 0; i < 9; ++i)
+	{
+		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
+		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
+	}
+
+	//now we can use the coefficients to compute the irradiance
+	vec3 irradiance = ComputeSHIrradiance( N, sh );
+	return irradiance;
+}
 
 void main()
 {
@@ -891,8 +1010,11 @@ void main()
 		shadow /= 9.0;
 		sublight *= shadow;
 	}
-
 	sublight *= occlusion;
+
+	if(u_apply_irradiance) {
+	//	sublight += computeIrradiance(world_position, N);
+	}
 
 	light += sublight;
 	vec3 color = albedo.xyz;
@@ -903,6 +1025,10 @@ void main()
 	{
 		vec3 emissive = extra.xyz;
 		color.xyz += emissive.xyz;
+	}
+
+	if(u_apply_irradiance) {
+		color = computeIrradiance(world_position, N);
 	}
 
 	FragColor = vec4(color,1.0);
@@ -1235,7 +1361,7 @@ vec3 RGB2xyY (vec3 rgb)
 
 void main() {
 	vec2 uv = v_uv + u_iRes * 0.5;
-	vec4 color = texture2D(u_texture, uv);
+	vec4 color = texture(u_texture, uv);
 	vec3 rgb = color.xyz;
 
 	float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -1245,8 +1371,10 @@ void main() {
 	rgb = (rgb / lum) * Ld;
 	rgb = max(rgb,vec3(0.001));
 	rgb = pow( rgb, vec3( u_igamma ) );
+
 	FragColor = vec4( rgb, color.a );
 }
+
 
 \probe.fs
 
@@ -1260,11 +1388,12 @@ uniform vec3 u_coeffs[9];
 
 out vec4 FragColor;
 
+#include "SHfunctions"
+
 void main()
 {
 	vec3 N = normalize(v_normal);
-	
-	/*
+
 	SH9Color sh;
 	sh.c[0] = u_coeffs[0];
 	sh.c[1] = u_coeffs[1];
@@ -1274,9 +1403,417 @@ void main()
 	sh.c[5] = u_coeffs[5];
 	sh.c[6] = u_coeffs[6];
 	sh.c[7] = u_coeffs[7];
-	sh.c[8] = u_coeffs[8];*/
+	sh.c[8] = u_coeffs[8];
 
-	vec4 color = vec4(u_coeffs[0], 1.0);
+	vec4 color = vec4(ComputeSHIrradiance(N, sh), 1.0);
+
+	FragColor = color;
+}
+
+\skybox.fs
+
+#version 330 core
+
+in vec3 v_world_position;
+
+uniform vec4 u_color;
+uniform samplerCube u_environment_texture;
+uniform vec3 u_camera_position;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec3 V = v_world_position - u_camera_position;
+	//-V to void being upside down
+	vec4 color = texture( u_environment_texture, V );
+
+	FragColor = color;
+}
+
+
+\reflection.fs
+
+#version 330 core
+
+in vec3 v_world_position;
+in vec3 v_normal;
+
+uniform vec4 u_color;
+uniform samplerCube u_texture;
+uniform vec3 u_camera_position;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec3 V = v_world_position - u_camera_position;
+	vec3 N = normalize(v_normal);
+	vec3 R = reflect(V,N);
+
+	vec4 color = texture( u_texture, R );
+
+	FragColor = color;
+}
+
+
+\volume_direct.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_color_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_extra_texture;
+uniform sampler2D u_depth_texture;
+uniform sampler2D u_shadowmap_texture;
+
+uniform vec2 u_iRes;
+uniform vec3 u_camera_position;
+
+uniform mat4 u_inverse_viewprojection;
+
+#include "lightUniforms"
+#include "lightFunctions"
+
+out vec4 FragColor;
+
+#define SAMPLES 64
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	//vec2 uv = v_uv;
+
+	//reconstruct world position
+	float depth = texture( u_depth_texture, uv ).x;
+	vec4 screen_pos = vec4(uv.x*2.0-1.0, uv.y*2.0-1.0, depth*2.0-1.0, 1.0);
+	//convert clip space coordinate to world position
+	vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
+	vec3 world_position = proj_worldpos.xyz / proj_worldpos.w;
+
+
+	//volumetric variables
+	vec3 current_pos = u_camera_position;
+	vec3 ray_dir = world_position - u_camera_position;
+	float dist = length( ray_dir );
+	if(dist > 1000)
+		dist = 1000;
+	ray_dir /= dist;
+	float step_dist = dist / float(SAMPLES);
+	float transparency = 1.0;
+	float air_density = 0.001;
+	vec3 ray_offset = ray_dir * step_dist;
+	vec3 color = vec3(0.0);
+
+	for(int i = 0; i < SAMPLES; i++)
+	{
+		float pixel_transparency = air_density * step_dist;
+		transparency -= pixel_transparency;
+
+		float shadow_factor = 0.0;
+		if (u_cast_shadow)
+		{
+			shadow_factor = computeShadowFactor(current_pos, u_shadow_viewproj, u_shadow_bias, u_shadowmap_texture, u_light_type );
+		}
+		color += shadow_factor * u_light_color * pixel_transparency;
+
+		if(transparency < 0.001)
+			break;
+
+		//advance position
+		current_pos.xyz += ray_offset;
+	}
+	FragColor = vec4(color, transparency);
+	//FragColor = vec4(1.0,0.0,0.0,1.0);
+}
+
+
+\decals.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_color_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_extra_texture;
+uniform sampler2D u_depth_texture;
+
+uniform sampler2D u_decal_texture;
+
+uniform mat4 u_inverse_viewprojection;
+uniform vec2 u_iRes;
+uniform mat4 u_iModel;
+
+layout(location = 0) out vec4 FragColor;
+layout(location = 1) out vec4 NormalColor;
+layout(location = 2) out vec4 ExtraColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	vec4 albedo = texture( u_color_texture, uv );
+	vec4 normal = texture( u_normal_texture, uv);
+	vec4 extra = texture( u_extra_texture, uv);
+
+	vec3 N = normalize(normal.xyz * 2.0 - vec3(1.0));
+	
+	//reconstruct world position from depth and inv. viewproj
+	float depth = texture( u_depth_texture, uv ).x;
+	//convert in range -1 .. 1
+	vec4 screen_pos = vec4(uv.x*2.0-1.0, uv.y*2.0-1.0, depth*2.0-1.0, 1.0);
+	//convert clip space coordinate to world position
+	vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
+	vec3 world_position = proj_worldpos.xyz / proj_worldpos.w;
+
+	vec3 localpos = (u_iModel * vec4(world_position,1.0)).xyz;
+
+	uv = (localpos.xz / 2.0) + vec2(0.5);
+	if( uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+		discard;
+	
+	vec4 decal = texture(u_decal_texture, uv);
+
+	if(decal.a < 0.5)
+		discard;
+
+	//albedo.xyza = vec4(1.0,0,0, 1.0);
+	albedo.xyz = decal.xyz;
+	FragColor = albedo;
+	NormalColor = normal;
+	ExtraColor = extra;
+}
+
+\irradiance.fs
+
+#version 330 core
+
+uniform sampler2D u_color_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_extra_texture;
+uniform sampler2D u_depth_texture;
+uniform sampler2D u_probes_texture;
+uniform mat4 u_inverse_viewprojection;
+uniform vec2 u_iRes;
+
+uniform vec3 u_irr_start;
+uniform vec3 u_irr_end;
+uniform vec3 u_irr_dims; 
+uniform vec3 u_irr_delta;
+uniform float u_num_probes;
+uniform float u_irr_normal_distance;
+
+out vec4 FragColor;
+
+#include "SHfunctions"
+
+vec3 computeIrradiance(vec3 world_pos, vec3 N) {
+	//computing nearest probe index based on world position
+	vec3 irr_range = u_irr_end - u_irr_start;
+	vec3 irr_local_pos = clamp( world_pos - u_irr_start + N * u_irr_normal_distance, vec3(0.0), irr_range );
+
+	//convert from world pos to grid pos
+	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
+
+	//round values as we cannot fetch between rows for now
+	vec3 local_indices = round( irr_norm_pos );
+
+	//compute in which row is the probe stored
+	float row = local_indices.x + local_indices.y * u_irr_dims.x + local_indices.z * u_irr_dims.x * u_irr_dims.y;
+
+	//find the UV.y coord of that row in the probes texture
+	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
+
+	SH9Color sh;
+
+	//fill the coefficients
+	const float d_uvx = 1.0 / 9.0;
+	for(int i = 0; i < 9; ++i)
+	{
+		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
+		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
+	}
+
+	//now we can use the coefficients to compute the irradiance
+	return ComputeSHIrradiance( N, sh );
+}
+
+void main()
+{	
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	vec4 albedo = texture( u_color_texture, uv );
+	vec4 normal = texture( u_normal_texture, uv);
+	vec4 extra = texture( u_extra_texture, uv);
+	
+	vec3 N = normalize(normal.xyz * 2.0 - vec3(1.0));
+		
+	//reconstruct world position from depth and inv. viewproj
+	float depth = texture( u_depth_texture, uv ).x;
+	//convert in range -1 .. 1
+	vec4 screen_pos = vec4(uv.x*2.0-1.0, uv.y*2.0-1.0, depth*2.0-1.0, 1.0);
+	//convert clip space coordinate to world position
+	vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
+	vec3 world_position = proj_worldpos.xyz / proj_worldpos.w;
+
+	vec3 irradiance = computeIrradiance(world_position, N);
+	
+	FragColor = vec4(irradiance, 1.0);
+}
+
+\motion_blur.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_depth_texture;
+
+uniform vec2 u_iRes;
+
+uniform mat4 u_inverse_viewprojection;
+uniform mat4 u_prev_vp;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	//vec2 uv = v_uv;
+
+	//reconstruct world position
+	float depth = texture( u_depth_texture, uv ).x;
+	vec4 screen_pos = vec4(uv.x*2.0-1.0, uv.y*2.0-1.0, depth*2.0-1.0, 1.0);
+	//convert clip space coordinate to world position
+	vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
+	vec3 world_position = proj_worldpos.xyz / proj_worldpos.w;
+
+	vec4 old_screenpos = u_prev_vp * vec4(world_position, 1.0);
+	old_screenpos.xyz /= old_screenpos.w;
+	vec2 uv_old = old_screenpos.xy * 0.5 + vec2(0.5);
+
+	//vec3 color = vec3(old_screenpos.xyz * 0.5 + vec3(0.5));
+	vec3 color = vec3(0.0);
+	//interpolation
+	for ( int i= 0; i < 16; i++)
+	{
+		float factor = float(i) / 16.0;
+		vec2 uv_temp = mix(uv, uv_old, factor);
+		color += texture(u_texture, uv_temp).xyz;
+	}
+	color /= 16.0;
+	FragColor = vec4(color, 1.0);
+}
+
+\pixelated.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform vec2 u_iRes;
+uniform int u_pixel_size;
+
+out vec4 FragColor;
+
+void main()
+{
+	//u_pixel_size needs to be odd
+
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	vec2 texSize  = textureSize(u_texture, 0).xy;
+	vec2 texCoord = uv / texSize;
+
+	float x = int(gl_FragCoord.x) % u_pixel_size;
+	float y = int(gl_FragCoord.y) % u_pixel_size;
+
+	x = floor(u_pixel_size / 2.0) - x;
+	y = floor(u_pixel_size / 2.0) - y;
+
+	x += gl_FragCoord.x;
+	y += gl_FragCoord.y;
+
+	vec2 new_uv = vec2(x,y) / texSize;
+	vec4 color = texture(u_texture, new_uv);
+
+	FragColor = color;
+}
+
+\blur.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform vec2 u_iRes;
+uniform int u_blur_size;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	vec4 color = vec4(0.0);
+	
+	if (u_blur_size == 0) {
+		//no blur
+		color = texture(u_texture, uv);
+	} else {
+		int cnt = 0;
+		for (int i = -u_blur_size; i <= u_blur_size; ++i) {
+			for (int j = -u_blur_size; j <= u_blur_size; ++j) {
+				color += texture(u_texture, (gl_FragCoord.xy + vec2(i,j)) * u_iRes.xy);
+				cnt += 1;
+			}
+		}
+
+		color /= cnt;
+	}
+
+	FragColor = color;
+}
+
+
+\dof.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_blur_texture;
+uniform sampler2D u_depth_texture;
+uniform vec2 u_iRes;
+uniform int u_blur_size;
+uniform vec2 u_camera_nearfar;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	vec4 color = vec4(0.0);
+	
+	vec2 texSize  = textureSize(u_texture, 0).xy;
+
+	float depth = texture( u_depth_texture, uv ).x;
+	float n = u_camera_nearfar.x;
+	float f = u_camera_nearfar.y;
+	float z = texture2D(u_depth_texture,v_uv).x;
+	float color_depth = n * (z + 1.0) / (f + n - z * (f - n));
+
+	if(color_depth > 0.15) {
+		color = mix( texture(u_blur_texture, uv), texture(u_texture, uv), 0.4);
+	} else {
+		color = mix( texture(u_texture, uv), texture(u_blur_texture, uv), 0.2);
+	}
 
 	FragColor = color;
 }
