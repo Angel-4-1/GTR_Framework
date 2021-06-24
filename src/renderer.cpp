@@ -298,7 +298,7 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 	else if (show_ao && ao_buffer) {
 		ao_buffer->toViewport();
 	}
-	else if (show_irradiance_coeffs) {
+	else if (show_irradiance_coeffs && probes_texture != NULL) {
 	//	probes_texture->toViewport();
 		int w = Application::instance->window_width;
 		int h = Application::instance->window_height;
@@ -330,14 +330,10 @@ void Renderer::renderDeferred(GTR::Scene* scene, std::vector< renderCall >& data
 		glEnable(GL_DEPTH_TEST);
 		
 		if (irr && apply_irradiance && show_probes)
-		{
 			irr->render(NULL, camera);
-		}
 
-		if (show_reflection_probes)
-		{
+		if (use_reflection && show_reflection_probes)
 			reflection_entity->render(camera);
-		}
 		
 		if(!use_dithering)
 			renderAlphaElements(data, camera);
@@ -820,7 +816,7 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, Mesh* mesh, GTR::Mat
 	}
 	//Deferred
 	else {
-		if (_nearest_reflection_probe != NULL && _nearest_reflection_probe->cubemap != NULL) {
+		if (_nearest_reflection_probe != NULL && _nearest_reflection_probe->cubemap != NULL && use_reflection) {
 			shader->setUniform("u_last_pass", true);
 			shader->setTexture("u_reflection_texture", _nearest_reflection_probe->cubemap, 7);
 		}
@@ -1152,19 +1148,33 @@ void Renderer::renderInMenu()
 			updateIrradianceCache(GTR::Scene::instance);
 		}
 		ImGui::Checkbox("Show coeffs", &show_irradiance_coeffs);
+		bool save_irr = false;
+		save_irr |= ImGui::Button("Save Irradiance to disk");
+		if (save_irr) {
+			GTR::Scene::instance->saveIrradianceToDisk();
+		}
+		bool read_irr = false;
+		read_irr |= ImGui::Button("Read Irradiance from disk");
+		if (read_irr) {
+			readIrradiance(GTR::Scene::instance);
+		}
 		ImGui::TreePop();
 	}
 	
-	ImGui::Checkbox("Show Reflection Probes", &show_reflection_probes);
-	bool compute_ref = false;
-	compute_ref |= ImGui::Button("Compute Reflection");
-	bool update_ref_pos = false;
-	update_ref_pos |= ImGui::Button("Update Reflection values");
-	if (compute_ref) {
-		updateReflectionProbes(GTR::Scene::instance);
-	}
-	else if (update_ref_pos) {
-		reflection_entity->placeProbes();
+	//Reflection
+	ImGui::Checkbox("Use Reflection", &use_reflection);
+	if (use_reflection) {
+		ImGui::Checkbox("Show Reflection Probes", &show_reflection_probes);
+		bool compute_ref = false;
+		compute_ref |= ImGui::Button("Compute Reflection");
+		bool update_ref_pos = false;
+		update_ref_pos |= ImGui::Button("Update Reflection values");
+		if (compute_ref) {
+			updateReflectionProbes(GTR::Scene::instance);
+		}
+		else if (update_ref_pos) {
+			reflection_entity->placeProbes();
+		}
 	}
 
 	if (changed_fbo)
@@ -1239,6 +1249,16 @@ void GTR::Renderer::resizeFBOs()
 
 	if (blur_fbo.fbo_id != 0) {
 		blur_fbo.create(Application::instance->window_width, Application::instance->window_height, 1, GL_RGBA, GL_FLOAT, false);
+	}
+
+	if (decals_fbo.fbo_id != 0)
+	{
+		decals_fbo.freeTextures();
+		decals_fbo.create(Application::instance->window_width,
+			Application::instance->window_height,
+			3,	//num textures
+			GL_RGBA,
+			GL_FLOAT);	//precision
 	}
 }
 
@@ -1519,6 +1539,13 @@ void GTR::Renderer::renderPostFX(Camera* camera, Texture* texture)
 	}
 
 	texture->toViewport(shader);
+}
+
+void GTR::Renderer::readIrradiance(GTR::Scene* scene)
+{
+	scene->readIrradianceFromDisk();
+	//build the irradiance texture
+	storeIrradianceToTexture();
 }
 
 std::vector<Vector3> generateSpherePoints(int num, float radius, bool hemi)

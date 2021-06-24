@@ -124,8 +124,10 @@ namespace GTR {
 	class IrradianceEntity : public GTR::BaseEntity
 	{
 	public:
-		int dimensions[3];	//Dimensions of axis x,y,z
-		float scale;		//separation within probes
+		Vector3 dim;		//dimensions
+		Vector3 start_pos;	//start position
+		Vector3 end_pos;	//end position
+		Vector3 delta;		//separation between probes
 		float size;			//size of each probe
 
 		//where to store the probes
@@ -133,16 +135,11 @@ namespace GTR {
 
 		IrradianceEntity();
 		virtual void configure(cJSON* json);
-		void render(Shader* shader, Camera* camera);
-		void init(Vector3 dim, float _scale, float _size);
+		void updateDelta();
 		void placeProbes();
-		void renderInMenu();
 		void uploadToShader(Shader* shader);
-
-		Vector3 dim = Vector3(8, 6, 12);
-		Vector3 start_pos = Vector3(-200, 10, -350);
-		Vector3 end_pos = Vector3(550, 250, 450);	
-		Vector3 delta;
+		void render(Shader* shader, Camera* camera);
+		void renderInMenu();
 	};
 
 
@@ -165,6 +162,14 @@ namespace GTR {
 
 		DecalEntity();
 		virtual void configure(cJSON* json);
+	};
+
+	struct sIrrHeader {
+		Vector3 start;
+		Vector3 end;
+		Vector3 delta;
+		Vector3 dims;
+		int num_probes;
 	};
 
 	//contains all entities of the scene
@@ -193,6 +198,8 @@ namespace GTR {
 		void updatePrefabNearestReflectionProbe();
 		bool load(const char* filename);
 		BaseEntity* createEntity(std::string type);
+		void saveIrradianceToDisk();
+		bool readIrradianceFromDisk();
 	};
 
 };

@@ -182,6 +182,7 @@ namespace GTR {
 		bool show_irradiance_coeffs = false;
 		bool freeze_prev_vp = false;
 		bool apply_post_fx = false;
+		bool use_reflection = true;
 		bool show_reflection_probes = true;
 		int light_camera;	//light to show on depth camera
 
@@ -257,6 +258,8 @@ namespace GTR {
 		void renderDecals(GTR::Scene* scene, Camera* camera);
 
 		void renderPostFX(Camera* camera, Texture* texture);
+
+		void readIrradiance(GTR::Scene* scene);
 	};
 
 	Texture* CubemapFromHDRE(const char* filename);

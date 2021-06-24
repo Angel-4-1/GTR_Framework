@@ -166,6 +166,61 @@ GTR::BaseEntity* GTR::Scene::createEntity(std::string type)
 	return NULL;
 }
 
+void GTR::Scene::saveIrradianceToDisk()
+{
+	std::cout << "Saving irradiance to file --> data/irradiance.bin ... ";
+
+	//fill header structure
+	sIrrHeader header;
+	header.start = irr->start_pos;
+	header.end = irr->end_pos;
+	header.dims = irr->dim;
+	header.delta = irr->delta;
+	header.num_probes = irr->dim.x * irr->dim.y * irr->dim.z;
+
+	//write header to file
+	FILE* f = fopen("data/irradiance.bin", "wb");
+	fwrite(&header, sizeof(header), 1, f);
+	//write probes value
+	fwrite(&(irr->probes[0]), sizeof(sProbe), irr->probes.size(), f);
+	fclose(f);
+
+	std::cout << "Saved!" << std::endl;
+}
+
+bool GTR::Scene::readIrradianceFromDisk()
+{
+	std::cout << "Reading irradiance from file --> data/irradiance.bin ... ";
+
+	//open file
+	FILE* f = fopen("data/irradiance.bin", "rb");
+
+	if (!f) {
+		std::cout << "File data/irradiance.bin not found" << std::endl;
+		return false;
+	}
+
+	//read header
+	sIrrHeader header;
+	fread(&header, sizeof(header), 1, f);
+
+	//copy info from header to our local vars
+	irr->start_pos = header.start;
+	irr->end_pos = header.end;
+	irr->dim = header.dims;
+	irr->delta = header.delta;
+	int num_probes = header.num_probes;
+
+	//allocate space for the probes
+	irr->probes.resize(num_probes);
+
+	//read from disk directly to our probes container in memory
+	fread(&irr->probes[0], sizeof(sProbe), irr->probes.size(), f);
+	fclose(f);
+
+	std::cout << "Read!" << std::endl;
+}
+
 void GTR::BaseEntity::renderInMenu()
 {
 #ifndef SKIP_IMGUI
@@ -497,31 +552,24 @@ void GTR::LightEntity::renderLight(Camera* camera)
 GTR::IrradianceEntity::IrradianceEntity()
 {
 	entity_type = IRRADIANCE;
-	dimensions[0] = 1;
-	dimensions[1] = 1;
-	dimensions[2] = 1;
-	scale = 1;
 	size = 1;
 
-
-	delta = (end_pos - start_pos);
-	delta.x /= (dim.x - 1);
-	delta.y /= (dim.y - 1);
-	delta.z /= (dim.z - 1);
+	updateDelta();
 }
 
 void GTR::IrradianceEntity::configure(cJSON* json)
 {
-	if (cJSON_GetObjectItem(json, "position"))
+	if (cJSON_GetObjectItem(json, "start_position"))
 	{
 		model.setIdentity();
-		Vector3 position = readJSONVector3(json, "position", Vector3());
+		Vector3 position = readJSONVector3(json, "start_position", Vector3());
 		model.translate(position.x, position.y, position.z);
+		start_pos = position;
 	}
 
-	if (cJSON_GetObjectItem(json, "scale"))
+	if (cJSON_GetObjectItem(json, "end_position"))
 	{
-		scale = cJSON_GetObjectItem(json, "scale")->valuedouble;
+		end_pos = readJSONVector3(json, "end_position", Vector3());
 	}
 
 	if (cJSON_GetObjectItem(json, "size"))
@@ -531,86 +579,25 @@ void GTR::IrradianceEntity::configure(cJSON* json)
 
 	if (cJSON_GetObjectItem(json, "dimensions"))
 	{
-		Vector3 dim = readJSONVector3(json, "dimensions", Vector3(1,1,1));
-		dimensions[0] = dim.x;
-		dimensions[1] = dim.y;
-		dimensions[2] = dim.z;
+		dim = readJSONVector3(json, "dimensions", Vector3(1,1,1));
 	}
-}
-
-void GTR::IrradianceEntity::init(Vector3 dim, float _scale, float _size) {
-	dimensions[0] = dim.x;
-	dimensions[1] = dim.y;
-	dimensions[2] = dim.z;
-	scale = _scale;
-	size = _size;
-	model.setIdentity();
 }
 
 void GTR::IrradianceEntity::render(Shader* shader, Camera* camera)
 {
-	//Mesh* mesh = Mesh::Get("data/meshes/sphere.obj", false);
-	//Shader* basic_shader = Shader::getDefaultShader("flat");
-	//basic_shader->enable();
-	//glDisable(GL_DEPTH_TEST);
-	//basic_shader->setUniform("u_color", Vector4(1.0, 1.0, 1.0, 1.0));
+	glEnable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
 
 	for (int i = 0; i < probes.size(); i++)
 	{
 		probes[i].render(camera);
 	}
-
-	//glEnable(GL_DEPTH_TEST);
-	//basic_shader->disable();
 }
 
 void GTR::IrradianceEntity::placeProbes()
 {
 	probes.clear();
-	Vector3 irr_pos = model.getTranslation();
-
-	//create the probes
-	//for (int x = 0; x < dimensions[0]; x++) {
-	//	for (int y = 0; y < dimensions[1]; y++) {
-	//		for (int z = 0; z < dimensions[2]; z++) {
-	//			Vector3 position = Vector3( (x * scale) + irr_pos.x, (y * scale) + irr_pos.y, (z * scale) + irr_pos.z);
-	//			
-	//			sProbe probe;
-	//			//initialize
-	//			memset(&probe, 0, sizeof(probe));
-	//			probe.sh.coeffs[0].set(1, 0, 0);
-	//			probe.sh.coeffs[1].set(0, 1, 0);
-	//			probe.sh.coeffs[2].set(0, 0, 1);
-	//			probe.pos.set(position.x, position.y, position.z);
-	//			probe.local.set(x, y, z);
-	//			probe.index = x + y * dimensions[0] + z * dimensions[0] * dimensions[1];
-	//			probe.size = size;
-
-	//			probes.push_back(probe);
-	//		}
-	//	}
-	//}
-	
-	//for (int z = 0; z < dimensions[2]; z++) {
-	//	for (int y = 0; y < dimensions[1]; y++) {
-	//		for (int x = 0; x < dimensions[0]; x++) {
-	//			Vector3 position = Vector3( (x * scale) + irr_pos.x, (y * scale) + irr_pos.y, (z * scale) + irr_pos.z);
-	//			
-	//			sProbe probe;
-	//			//initialize
-	//			memset(&probe, 0, sizeof(probe));
-	//			probe.sh.coeffs[0].set(1, 0, 0);
-	//			probe.sh.coeffs[1].set(0, 1, 0);
-	//			probe.sh.coeffs[2].set(0, 0, 1);
-	//			probe.pos.set(position.x, position.y, position.z);
-	//			probe.local.set(x, y, z);
-	//			probe.index = x + y * dimensions[0] + z * dimensions[0] * dimensions[1];
-	//			probe.size = size;
-
-	//			probes.push_back(probe);
-	//		}
-	//	}
-	//}
 
 	for (int z = 0; z < dim.z; ++z)
 		for (int y = 0; y < dim.y; ++y)
@@ -636,13 +623,23 @@ void GTR::IrradianceEntity::renderInMenu()
 {
 #ifndef SKIP_IMGUI
 	bool changed = false;
+	bool changed_dimension = false;
 	ImGuiMatrix44(model, "Model");
-	changed |= ImGui::SliderFloat("Scale", &scale, 0, 500);
-	changed |= ImGui::SliderFloat("Size", &size, 0, 20);
-	changed |= ImGui::SliderInt3("Dimensions", &dimensions[0], 1, 50);
+	changed |= ImGui::SliderFloat("Size Probes", &size, 0, 20);
+	changed_dimension |= ImGui::SliderFloat3("Dimensions", &dim.x, 1, 50);
 	changed |= ImGui::Button("Update values");
-	if (changed)
+	changed |= ImGui::SliderFloat3("Start Position", &start_pos.x, -2000, 2000);
+	changed |= ImGui::SliderFloat3("End Position", &end_pos.x, -2000, 2000);
+	if (changed_dimension)
 	{
+		dim.x = floor(dim.x);
+		dim.y = floor(dim.y);
+		dim.z = floor(dim.z);
+	}
+	
+	if (changed || changed_dimension)
+	{
+		updateDelta();
 		placeProbes();
 	}
 #endif
@@ -650,23 +647,6 @@ void GTR::IrradianceEntity::renderInMenu()
 
 void GTR::IrradianceEntity::uploadToShader(Shader* shader)
 {
-	//Vector3 irr_start = model.getTranslation();
-	//shader->setUniform("u_irr_start", irr_start);
-	//Vector3 irr_end = Vector3((dimensions[0] * scale) + irr_start.x,
-	//	(dimensions[1] * scale) + irr_start.y,
-	//	(dimensions[2] * scale) + irr_start.z);
-	////irr_end = probes[probes.size() - 1].pos;
-	//shader->setUniform("u_irr_end", irr_end);
-	//shader->setUniform("u_irr_normal_distance", 1);
-	//Vector3 irr_dim = Vector3(dimensions[0], dimensions[1], dimensions[2]);
-	//shader->setUniform("u_irr_dims", irr_dim);
-	//int num_probes = probes.size(); //dimensions[0] * dimensions[1] * dimensions[2];
-	//shader->setUniform("u_num_probes", num_probes);
-	//Vector3 delta = (irr_end - irr_start);
-	////shader->setUniform("u_irr_delta", delta);
-	//shader->setUniform("u_irr_delta", Vector3(scale,scale,scale));
-
-
 	shader->setUniform("u_irr_end", end_pos);
 	shader->setUniform("u_irr_start", start_pos);
 	shader->setUniform("u_irr_normal_distance", 1);
@@ -675,23 +655,26 @@ void GTR::IrradianceEntity::uploadToShader(Shader* shader)
 	shader->setUniform("u_num_probes", (float)probes.size());
 }
 
+void GTR::IrradianceEntity::updateDelta()
+{
+	delta = (end_pos - start_pos);
+	delta.x /= (dim.x - 1);
+	delta.y /= (dim.y - 1);
+	delta.z /= (dim.z - 1);
+}
+
 void GTR::sProbe::render(Camera* cam)
 {
-	Camera* camera = cam;
 	Shader* shader = Shader::Get("probe");
 	Mesh* mesh = Mesh::Get("data/meshes/sphere.obj", false);
-
-	glEnable(GL_CULL_FACE);
-	glDisable(GL_BLEND);
-	glEnable(GL_DEPTH_TEST);
 
 	Matrix44 model;
 	model.setTranslation(pos.x, pos.y, pos.z);
 	model.scale(size, size, size);
 
 	shader->enable();
-	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
-	shader->setUniform("u_camera_position", camera->eye);
+	shader->setUniform("u_viewprojection", cam->viewprojection_matrix);
+	shader->setUniform("u_camera_position", cam->eye);
 	shader->setUniform("u_model", model);
 	shader->setUniform3Array("u_coeffs", sh.coeffs[0].v, 9);
 

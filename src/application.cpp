@@ -93,6 +93,8 @@ Application::Application(int window_width, int window_height, SDL_Window* window
 	scene->environment = GTR::CubemapFromHDRE(scene->environment_file.c_str());
 
 	scene->updatePrefabNearestReflectionProbe();
+	if (scene->irr)
+		scene->irr->updateDelta();
 
 	//update camera values after having read the file
 	camera->lookAt(scene->main_camera.eye, scene->main_camera.center, Vector3(0, 1, 0));

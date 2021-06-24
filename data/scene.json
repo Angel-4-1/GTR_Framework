@@ -9,9 +9,9 @@
     {
       "name": "irr",
       "type": "IRRADIANCE",
-      "position": [ -80, 40, -360 ],
-      "dimensions": [ 5, 5, 5 ],
-      "scale": 50,
+      "start_position": [ -200, 40, -340 ],
+      "end_position": [ 500, 240, 500 ],
+      "dimensions": [ 10, 8, 12 ],
       "size": 10
     },
     {
