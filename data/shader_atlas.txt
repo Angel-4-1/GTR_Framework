@@ -29,6 +29,12 @@ motion_blur quad.vs motion_blur.fs
 pixelated quad.vs pixelated.fs
 blur quad.vs blur.fs
 dof quad.vs dof.fs
+grain quad.vs grain.fs
+chromatic quad.vs chromatic.fs
+bloom quad.vs bloom.fs
+lens quad.vs lens.fs
+lut quad.vs lut.fs
+fxaa quad.vs fxaa.fs
 
 \basic.vs
 
@@ -128,6 +134,132 @@ void main()
 	FragColor = color;
 }
 
+\irradianceFunctions
+vec3 computeIrradiance(vec3 world_pos, vec3 N) {
+	//computing nearest probe index based on world position
+	vec3 irr_range = u_irr_end - u_irr_start;
+	vec3 irr_local_pos = clamp( world_pos - u_irr_start + N * u_irr_normal_distance, vec3(0.0), irr_range );
+
+	//convert from world pos to grid pos
+	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
+
+	//round values as we cannot fetch between rows for now
+	vec3 local_indices = round( irr_norm_pos );
+
+	//compute in which row is the probe stored
+	float row = local_indices.x + local_indices.y * u_irr_dims.x + local_indices.z * u_irr_dims.x * u_irr_dims.y;
+
+	//find the UV.y coord of that row in the probes texture
+	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
+
+	SH9Color sh;
+
+	//fill the coefficients
+	const float d_uvx = 1.0 / 9.0;
+	for(int i = 0; i < 9; ++i)
+	{
+		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
+		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
+	}
+	
+	//now we can use the coefficients to compute the irradiance
+	return ComputeSHIrradiance( N, sh );
+}
+
+vec3 computeIrr( vec3 indices, vec3 N ) {
+	//compute in which row is the probe stored
+	float row = indices.x + indices.y * u_irr_dims.x + indices.z * u_irr_dims.x * u_irr_dims.y;
+
+	//find the UV.y coord of that row in the probes texture
+	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
+
+	SH9Color sh;
+
+	//fill the coefficients
+	const float d_uvx = 1.0 / 9.0;
+	for(int i = 0; i < 9; ++i)
+	{
+		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
+		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
+	}
+	
+	//now we can use the coefficients to compute the irradiance
+	return ComputeSHIrradiance( N, sh );
+}
+
+vec3 computeIrradianceInterpolated(vec3 world_pos, vec3 N) {
+	//computing nearest probe index based on world position
+	vec3 irr_range = u_irr_end - u_irr_start;
+	vec3 irr_local_pos = clamp( world_pos - u_irr_start + N * u_irr_normal_distance, vec3(0.0), irr_range );
+
+	//convert from world pos to grid pos
+	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
+
+	//round values as we cannot fetch between rows for now
+	vec3 local_indices = floor( irr_norm_pos );
+
+	//now we have the interpolation factors
+	vec3 factors = irr_norm_pos - local_indices; 
+
+	//trilinear interpolation
+	//local_indices points to left bottom far
+	vec3 indicesLBF = local_indices;
+
+	//left top far
+	vec3 indicesLTF = local_indices;
+	indicesLTF.y += 1;
+
+	//left bottom near
+	vec3 indicesLBN = local_indices;
+	indicesLBN.z += 1;
+
+	//left top near
+	vec3 indicesLTN = local_indices;
+	indicesLTN.z += 1;
+	indicesLTN.y += 1;
+
+	//right bottom far
+	vec3 indicesRBF = local_indices;
+	indicesRBF.x += 1;
+
+	//right top far
+	vec3 indicesRTF = local_indices;
+	indicesRTF.x += 1;
+	indicesRTF.y += 1;
+
+	//right bottom near
+	vec3 indicesRBN = local_indices;
+	indicesRBN.x += 1;
+	indicesRBN.z += 1;
+
+	//right top near
+	vec3 indicesRTN = local_indices;
+	indicesRTN.x += 1;
+	indicesRTN.y += 1;
+	indicesRTN.z += 1;
+	
+	//compute irradiance for every corner
+	vec3 irrLBF = computeIrr( indicesLBF, N );
+	vec3 irrRBF = computeIrr( indicesRBF, N );
+	vec3 irrLTF = computeIrr( indicesLTF, N );
+	vec3 irrRTF = computeIrr( indicesRTF, N );
+	vec3 irrLBN = computeIrr( indicesLBN, N );
+	vec3 irrRBN = computeIrr( indicesRBN, N );
+	vec3 irrLTN = computeIrr( indicesLTN, N );
+	vec3 irrRTN = computeIrr( indicesRTN, N );
+
+	vec3 irrTF = mix( irrLTF, irrRTF, factors.x );
+	vec3 irrBF = mix( irrLBF, irrRBF, factors.x );
+	vec3 irrTN = mix( irrLTN, irrRTN, factors.x );
+	vec3 irrBN = mix( irrLBN, irrRBN, factors.x );
+
+	vec3 irrT = mix( irrTF, irrTN, factors.z );
+	vec3 irrB = mix( irrBF, irrBN, factors.z );
+	
+	vec3 irr = mix( irrB, irrT, factors.y );
+
+	return irr;
+}
 
 \lightUniforms
 uniform vec3 u_ambient_light;
@@ -897,57 +1029,26 @@ uniform bool u_is_emissor;
 uniform bool u_has_ssao;
 uniform bool u_linear_correction;
 
+uniform bool u_last_pass;
 uniform float u_gamma;
 uniform mat4 u_inverse_viewprojection;
 uniform bool u_has_environment;
 uniform bool u_apply_irradiance;
 uniform sampler2D u_probes_texture;
+
 uniform vec3 u_irr_start;
 uniform vec3 u_irr_end;
-uniform float u_irr_normal_distance;
-uniform vec3 u_irr_dims;
-uniform int u_num_probes;
+uniform vec3 u_irr_dims; 
 uniform vec3 u_irr_delta;
+uniform float u_num_probes;
+uniform float u_irr_normal_distance;
 
 #include "lightUniforms"
 #include "lightFunctions"
 #include "SHfunctions"
+#include "irradianceFunctions"
 
 out vec4 FragColor;
-
-vec3 computeIrradiance(vec3 world_pos, vec3 N) {
-	//computing nearest probe index based on world position
-	vec3 irr_range = u_irr_end - u_irr_start;
-	vec3 irr_local_pos = clamp( world_pos - u_irr_start + N * u_irr_normal_distance, vec3(0.0), irr_range );
-	//vec3 irr_range = u_irr_start - u_irr_end;
-	//vec3 irr_local_pos = clamp( world_pos - u_irr_end + N * u_irr_normal_distance, vec3(0.0), irr_range );
-
-	//convert from world pos to grid pos
-	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
-
-	//round values as we cannot fetch between rows for now
-	vec3 local_indices = round( irr_norm_pos );
-
-	//compute in which row is the probe stored
-	float row = local_indices.x + local_indices.y * u_irr_dims.x + local_indices.z * u_irr_dims.x * u_irr_dims.y;
-
-	//find the UV.y coord of that row in the probes texture
-	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
-
-	SH9Color sh;
-
-	//fill the coefficients
-	const float d_uvx = 1.0 / 9.0;
-	for(int i = 0; i < 9; ++i)
-	{
-		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
-		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
-	}
-
-	//now we can use the coefficients to compute the irradiance
-	vec3 irradiance = ComputeSHIrradiance( N, sh );
-	return irradiance;
-}
 
 void main()
 {
@@ -984,7 +1085,13 @@ void main()
 		occlusion = texture( u_ssao_texture, uv ).x;
 	}
 
-	vec3 light = u_ambient_light * occlusion;
+	vec3 light = u_ambient_light;
+	if(u_apply_irradiance) 
+	{
+		vec3 irradiance = computeIrradianceInterpolated( world_position, N );
+		light += irradiance;
+	}
+	light *= occlusion;
 	vec3 sublight = vec3(0.0);
 	//sublight += computeLight( N, u_light_type, u_light_position, world_position, u_light_vector, u_spot_cosine_cutoff, u_spot_exponent, u_light_max_distance, u_light_intensity, light_color );
 	
@@ -1025,10 +1132,6 @@ void main()
 	{
 		vec3 emissive = extra.xyz;
 		color.xyz += emissive.xyz;
-	}
-
-	if(u_apply_irradiance) {
-		color = computeIrradiance(world_position, N);
 	}
 
 	FragColor = vec4(color,1.0);
@@ -1608,132 +1711,7 @@ uniform float u_irr_normal_distance;
 out vec4 FragColor;
 
 #include "SHfunctions"
-
-vec3 computeIrradiance(vec3 world_pos, vec3 N) {
-	//computing nearest probe index based on world position
-	vec3 irr_range = u_irr_end - u_irr_start;
-	vec3 irr_local_pos = clamp( world_pos - u_irr_start + N * u_irr_normal_distance, vec3(0.0), irr_range );
-
-	//convert from world pos to grid pos
-	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
-
-	//round values as we cannot fetch between rows for now
-	vec3 local_indices = round( irr_norm_pos );
-
-	//compute in which row is the probe stored
-	float row = local_indices.x + local_indices.y * u_irr_dims.x + local_indices.z * u_irr_dims.x * u_irr_dims.y;
-
-	//find the UV.y coord of that row in the probes texture
-	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
-
-	SH9Color sh;
-
-	//fill the coefficients
-	const float d_uvx = 1.0 / 9.0;
-	for(int i = 0; i < 9; ++i)
-	{
-		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
-		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
-	}
-	
-	//now we can use the coefficients to compute the irradiance
-	return ComputeSHIrradiance( N, sh );
-}
-
-vec3 computeIrr( vec3 indices, vec3 N ) {
-	//compute in which row is the probe stored
-	float row = indices.x + indices.y * u_irr_dims.x + indices.z * u_irr_dims.x * u_irr_dims.y;
-
-	//find the UV.y coord of that row in the probes texture
-	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
-
-	SH9Color sh;
-
-	//fill the coefficients
-	const float d_uvx = 1.0 / 9.0;
-	for(int i = 0; i < 9; ++i)
-	{
-		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
-		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
-	}
-	
-	//now we can use the coefficients to compute the irradiance
-	return ComputeSHIrradiance( N, sh );
-}
-
-vec3 computeIrradianceInterpolated(vec3 world_pos, vec3 N) {
-	//computing nearest probe index based on world position
-	vec3 irr_range = u_irr_end - u_irr_start;
-	vec3 irr_local_pos = clamp( world_pos - u_irr_start + N * u_irr_normal_distance, vec3(0.0), irr_range );
-
-	//convert from world pos to grid pos
-	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
-
-	//round values as we cannot fetch between rows for now
-	vec3 local_indices = floor( irr_norm_pos );
-
-	//now we have the interpolation factors
-	vec3 factors = irr_norm_pos - local_indices; 
-
-	//trilinear interpolation
-	//local_indices points to left bottom far
-	vec3 indicesLBF = local_indices;
-
-	//left top far
-	vec3 indicesLTF = local_indices;
-	indicesLTF.y += 1;
-
-	//left bottom near
-	vec3 indicesLBN = local_indices;
-	indicesLBN.z += 1;
-
-	//left top near
-	vec3 indicesLTN = local_indices;
-	indicesLTN.z += 1;
-	indicesLTN.y += 1;
-
-	//right bottom far
-	vec3 indicesRBF = local_indices;
-	indicesRBF.x += 1;
-
-	//right top far
-	vec3 indicesRTF = local_indices;
-	indicesRTF.x += 1;
-	indicesRTF.y += 1;
-
-	//right bottom near
-	vec3 indicesRBN = local_indices;
-	indicesRBN.x += 1;
-	indicesRBN.z += 1;
-
-	//right top near
-	vec3 indicesRTN = local_indices;
-	indicesRTN.x += 1;
-	indicesRTN.y += 1;
-	indicesRTN.z += 1;
-	
-	//compute irradiance for every corner
-	vec3 irrLBF = computeIrr( indicesLBF, N );
-	vec3 irrRBF = computeIrr( indicesRBF, N );
-	vec3 irrLTF = computeIrr( indicesLTF, N );
-	vec3 irrRTF = computeIrr( indicesRTF, N );
-	vec3 irrLBN = computeIrr( indicesLBN, N );
-	vec3 irrRBN = computeIrr( indicesRBN, N );
-	vec3 irrLTN = computeIrr( indicesLTN, N );
-	vec3 irrRTN = computeIrr( indicesRTN, N );
-
-	vec3 irrTF = mix( irrLTF, irrRTF, factors.x );
-	vec3 irrBF = mix( irrLBF, irrRBF, factors.x );
-	vec3 irrTN = mix( irrLTN, irrRTN, factors.x );
-	vec3 irrBN = mix( irrLBN, irrRBN, factors.x );
-
-	vec3 irrT = mix( irrTF, irrTN, factors.z );
-	vec3 irrB = mix( irrBF, irrBN, factors.z );
-	
-	vec3 irr = mix( irrB, irrT, factors.y );
-
-	return irr;
-}
+#include "irradianceFunctions"
 
 void main()
 {	
@@ -1909,6 +1887,264 @@ void main()
 	} else {
 		color = mix( texture(u_texture, uv), texture(u_blur_texture, uv), 0.2);
 	}
+
+	/*
+	vec4 screen_pos = vec4(uv.x*2.0-1.0, uv.y*2.0-1.0, depth*2.0-1.0, 1.0);
+	vec4 proj_worldpos = u_inverse_viewprojection * screen_pos;
+	vec3 world_position = proj_worldpos.xyz / proj_worldpos.w;
+
+	float blur =
+    smoothstep
+      ( 8
+      , 12
+      , length(world_position - focusPoint)
+      );
+	color = mix( texture(u_texture, uv), texture(u_blur_texture, uv), blur );
+	*/
+	
+	FragColor = color;
+}
+
+
+\grain.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_noise_texture;
+uniform vec2 u_iRes;
+uniform vec2 u_uv_noise;
+uniform float u_time;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	vec3 color = texture(u_texture, uv).xyz;
+	
+
+	float r = clamp( cos(u_time), 0.01, 1);
+	vec3 noise_texture = texture(u_noise_texture, u_uv_noise ).xyz;
+
+	color += noise_texture*0.5;
+
+	FragColor = vec4( color, 1.0 );
+}
+
+
+\chromatic.fs
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform vec2 u_iRes;
+uniform float u_lens_distortion;
+
+out vec4 FragColor;
+
+vec2 barrelDistortion(vec2 coord, float amt) {
+	vec2 cc = coord - 0.5;
+	float dist = dot(cc, cc);
+	return coord + cc * dist * amt;
+}
+
+float sat( float t )
+{
+	return clamp( t, 0.0, 1.0 );
+}
+
+float linterp( float t ) {
+	return sat( 1.0 - abs( 2.0*t - 1.0 ) );
+}
+
+float remap( float t, float a, float b ) {
+	return sat( (t - a) / (b - a) );
+}
+
+vec4 spectrum_offset( float t ) {
+	vec4 ret;
+	float lo = step(t,0.5);
+	float hi = 1.0-lo;
+	float w = linterp( remap( t, 1.0/6.0, 5.0/6.0 ) );
+	ret = vec4(lo,1.0,hi, 1.) * vec4(1.0-w, w, 1.0-w, 1.);
+
+	return pow( ret, vec4(1.0/2.2) );
+}
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	vec4 sumcol = vec4(0.0);
+	vec4 sumw = vec4(0.0);	
+
+	float max_distort = 2.2;
+	int num_iter = 12;
+	float reci_num_iter_f = 1.0 / float(num_iter);
+
+	for ( int i=0; i<num_iter;++i )
+	{
+		float t = float(i) * reci_num_iter_f;
+		vec4 w = spectrum_offset( t );
+		sumw += w;
+		sumcol += w * texture( u_texture, barrelDistortion(uv, u_lens_distortion * max_distort*t ) );
+	}
+
+	FragColor = sumcol/sumw;
+}
+
+\lens.fs
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform vec2 u_iRes;
+uniform float u_lens_distortion;
+
+out vec4 FragColor;
+
+vec2 barrelDistortion(vec2 coord, float amt) {
+	vec2 cc = coord - 0.5;
+	float dist = dot(cc, cc);
+	return coord + cc * dist * amt;
+}
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	vec2 uv_barrel = barrelDistortion(uv, u_lens_distortion);
+	vec3 color = vec3(0.0);
+	if( uv_barrel.x >= 0.0 && uv_barrel.x <= 1.0 && uv_barrel.y >= 0.0 && uv_barrel.y <= 1.0 ) {
+		color = texture(u_texture, uv_barrel).xyz;
+	}
+	FragColor = vec4( color, 1.0 );
+}
+
+
+\bloom.fs
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_blur_texture;
+uniform vec2 u_iRes;
+uniform vec2 u_camera_nearfar;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	vec3 color = texture(u_texture, uv).xyz;
+	vec3 color_blur = texture(u_blur_texture, uv).xyz;
+
+	FragColor = vec4( color, 1.0 );
+}
+
+
+\lut.fs
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_lut_texture;
+uniform vec2 u_iRes;
+uniform float u_amount;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	vec4 color = clamp( texture(u_texture, uv), vec4(0.0), vec4(1.0) );
+
+	float blueColor = color.b * 63.0;
+	
+	vec2 quad1;
+	quad1.y = floor( floor( blueColor ) / 8.0 );
+	quad1.x = floor( blueColor ) - ( quad1.y * 8.0 );
+
+	vec2 quad2;
+	quad2.y = floor( ceil( blueColor ) / 8.0 );
+	quad2.x = ceil( blueColor ) - ( quad2.y * 8.0 );
+
+	vec2 texPos1;
+	texPos1.x = (quad1.x * 0.125) + 0.5/512.0 + ((0.125 - 1.0/512.0) * color.r);
+	texPos1.y = 1.0 - ((quad1.y * 0.125) + 0.5/512.0 + ((0.125 - 1.0/512.0) * color.g ));
+
+	vec2 texPos2;
+	texPos2.x = (quad2.x * 0.125) + 0.5/512.0 + ((0.125 - 1.0/512.0) * color.r);
+	texPos2.y = 1.0 - ((quad2.y * 0.125) + 0.5/512.0 + ((0.125 - 1.0/512.0) * color.g));
+
+	vec4 newColor1 = texture( u_lut_texture, texPos1 );
+	vec4 newColor2 = texture( u_lut_texture, texPos2 );
+	vec4 newColor = mix( newColor1, newColor2, fract(blueColor) );
+
+	FragColor = vec4( mix( color.rgb, newColor.rgb, u_amount), color.w);
+}
+
+
+\fxaa.fs
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform vec2 u_iRes;
+
+out vec4 FragColor;
+
+#define FXAA_REDUCE_MIN (1.0/ 128.0)
+#define FXAA_REDUCE_MUL (1.0 / 8.0)
+#define FXAA_SPAN_MAX 8.0
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	vec2 fragCoord = uv;
+	vec2 u_iViewportSize = u_iRes;
+
+	vec4 color = vec4(0.0);
+	vec3 rgbNW = texture( u_texture, (fragCoord + vec2(-1.0, -1.0)) * u_iViewportSize).xyz;
+	vec3 rgbNE = texture( u_texture, (fragCoord + vec2(1.0, -1.0)) * u_iViewportSize).xyz;
+	vec3 rgbSW = texture( u_texture, (fragCoord + vec2(-1.0, 1.0)) * u_iViewportSize).xyz;
+	vec3 rgbSE = texture( u_texture, (fragCoord + vec2(1.0, 1.0)) * u_iViewportSize).xyz;
+	vec3 rgbM  = texture( u_texture, fragCoord  * u_iViewportSize).xyz;
+	
+	vec3 luma = vec3(0.299, 0.587, 0.114);
+	float lumaNW = dot(rgbNW, luma);
+	float lumaNE = dot(rgbNE, luma);
+	float lumaSW = dot(rgbSW, luma);
+	float lumaSE = dot(rgbSE, luma);
+	float lumaM  = dot(rgbM,  luma);
+	float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+	float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
+	vec2 dir;
+	dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+	dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+	float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL), FXAA_REDUCE_MIN);
+
+	float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
+	dir = min(vec2(FXAA_SPAN_MAX, FXAA_SPAN_MAX), max(vec2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX), dir * rcpDirMin)) * u_iViewportSize;
+
+	vec3 rgbA = 0.5 * (texture( u_texture, fragCoord * u_iViewportSize + dir * (1.0 / 3.0 - 0.5)).xyz + texture( u_texture, fragCoord * u_iViewportSize + dir * (2.0 / 3.0 - 0.5)).xyz);
+	vec3 rgbB = rgbA * 0.5 + 0.25 * (texture( u_texture, fragCoord * u_iViewportSize + dir * -0.5).xyz + texture( u_texture, fragCoord * u_iViewportSize + dir * 0.5).xyz);
+
+
+	float lumaB = dot(rgbB, luma);
+	if ((lumaB < lumaMin) || (lumaB > lumaMax))
+		color = vec4(rgbA, 1.0);
+	else
+		color = vec4(rgbB, 1.0);
 
 	FragColor = color;
 }

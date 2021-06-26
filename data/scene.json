@@ -1,6 +1,6 @@
 {
   "background_color": [ 0.01, 0.01, 0.1 ],
-  "ambient_light": [ 0.1, 0.1, 0.2 ],
+  "ambient_light": [ 0.23, 0.332, 0.461 ],
   "environment": "night.hdre",
   "camera_position": [ -300, 90, -150 ],
   "camera_target": [ 0, 40, 0 ],
@@ -20,6 +20,14 @@
       "albedo": "textures/damageFloor.png",
       "position": [ -180, 10, -9 ],
       "scale": [ 100, 100, 100 ]
+    },
+    {
+      "name": "decalBatman",
+      "type": "DECAL",
+      "albedo": "textures/batman.png",
+      "position": [ 145, 90, -14 ],
+      "scale": [ 30, 30, 30 ],
+      "angle": [-90, 0, -90 ]
     },
     {
       "name": "floor",
@@ -110,7 +118,7 @@
       "type": "LIGHT",
       "position": [ 615, 760, 130 ],
       "target": [ 565, 507, -14 ],
-      "color": [ 0.1, 0.2, 0.4 ],
+      "color": [ 0.857, 0.882, 0.7 ],
       "intensity": 1.5,
       "area_size": 2800,
       "max_dist": 1000,

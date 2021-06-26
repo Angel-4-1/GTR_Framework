@@ -693,6 +693,14 @@ void GTR::DecalEntity::configure(cJSON* json)
 	std::string file = readJSONString(json, "albedo", "");
 	if (file.size())
 		albedo = Texture::Get((std::string("data/") + file).c_str());
+
+	if (cJSON_GetObjectItem(json, "angle"))
+	{
+		Vector3 angle = readJSONVector3(json, "angle", Vector3());
+		model.rotate(angle.x * DEG2RAD, Vector3(1, 0, 0));
+		model.rotate(angle.y * DEG2RAD, Vector3(0, 1, 0));
+		model.rotate(angle.z * DEG2RAD, Vector3(0, 0, 1));
+	}
 }
 
 GTR::sReflectionProbe::sReflectionProbe()

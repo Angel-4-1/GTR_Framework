@@ -54,7 +54,13 @@ namespace GTR {
 		FX_MOTION_BLUR,
 		FX_PIXELATED,
 		FX_BLUR,
-		FX_DEPTH_OF_FIELD
+		FX_DEPTH_OF_FIELD,
+		FX_GRAIN,
+		FX_CHROMATIC,
+		FX_BLOOM,
+		FX_LENS_DISTORTION,
+		FX_LUT,
+		FX_FXAA
 	};
 
 	class renderCall {
@@ -151,6 +157,8 @@ namespace GTR {
 		Texture* ao_buffer;
 		Texture* blur_ao_buffer;
 		Texture* probes_texture;
+		Texture* noise_texture;
+		Texture* lut_texture;
 
 		eRendererCondition renderer_cond;
 		eRenderMode render_mode;
@@ -181,7 +189,7 @@ namespace GTR {
 		bool apply_skybox = true;
 		bool show_irradiance_coeffs = false;
 		bool freeze_prev_vp = false;
-		bool apply_post_fx = false;
+		bool apply_post_fx = true;
 		bool use_reflection = true;
 		bool show_reflection_probes = true;
 		int light_camera;	//light to show on depth camera
@@ -189,6 +197,8 @@ namespace GTR {
 		//PostFX
 		int pixel_size = 5;
 		int blur_size = 5;
+		float lens_distortion = 0.5;
+		float lut_amount = 0.5;
 
 		Matrix44 vp_previous;
 
