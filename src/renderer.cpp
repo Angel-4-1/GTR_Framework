@@ -39,6 +39,7 @@ Renderer::Renderer() {
 	tone_mapper.init();
 	noise_texture = NULL;
 	irr_fbo = NULL;
+	lut_texture = NULL;
 }
 
 void Renderer::renderToFBO(GTR::Scene* scene, Camera* camera)
@@ -1105,7 +1106,7 @@ void Renderer::renderInMenu()
 			ImGui::Checkbox("Show Alpha GBuffers", &show_gbuffers_alpha);
 		ImGui::Checkbox("Apply Post Processing Effect", &apply_post_fx);
 		if (apply_post_fx) {
-			ImGui::Combo("PostFX", (int*)&post_fx, "MOTION-BLUR\0PIXELATED\0BLUR\0DEPTH-OF-FIELD\0GRAIN\0CHROMATIC\0BLOOM\0LENS-DISTORTION\0LUT\0FXAA", 4);
+			ImGui::Combo("PostFX", (int*)&post_fx, "MOTION-BLUR\0PIXELATED\0BLUR\0DEPTH-OF-FIELD\0GRAIN\0CHROMATIC\0BLOOM\0LENS-DISTORTION\0LUT\0FXAA\0SHARPEN", 4);
 			if (post_fx == FX_PIXELATED) {
 				bool changed_pixel = false;
 				changed_pixel |= ImGui::SliderInt("Pixel size", &pixel_size, 0, 21);
@@ -1119,11 +1120,22 @@ void Renderer::renderInMenu()
 			else if(post_fx == FX_BLUR || post_fx == FX_DEPTH_OF_FIELD) {
 				ImGui::SliderInt("Blur size", &blur_size, 0, 30);
 			}
+			else if (post_fx == FX_GRAIN ) {
+				ImGui::SliderFloat("Strength", &grain_strength, 0, 100);
+			}
 			else if (post_fx == FX_LENS_DISTORTION || post_fx == FX_CHROMATIC) {
 				ImGui::SliderFloat("Distortion", &lens_distortion, -1, 1);
 			}
 			else if (post_fx == FX_LUT) {
 				ImGui::SliderFloat("Amount", &lut_amount, 0, 1);
+			}
+			else if (post_fx == FX_BLOOM) {
+				ImGui::SliderFloat("Threshold", &bloom_threshold, 0, 3);
+				ImGui::SliderFloat("Soft Threshold", &bloom_soft_threshold, 0, 1);
+				ImGui::SliderFloat("Intensity", &bloom_intensity, 0, 10);
+			}
+			else if (post_fx == FX_SHARPEN) {
+				ImGui::SliderFloat("Contrast", &sharpen_contrast, 0, 1);
 			}
 		}
 	}
@@ -1144,7 +1156,7 @@ void Renderer::renderInMenu()
 		if (compute_irr) {
 			updateIrradianceCache(GTR::Scene::instance);
 		}
-		ImGui::Checkbox("Show coeffs", &show_irradiance_coeffs);
+		ImGui::Checkbox("Show irradiance", &show_irradiance_coeffs);
 		bool save_irr = false;
 		save_irr |= ImGui::Button("Save Irradiance to disk");
 		if (save_irr) {
@@ -1330,10 +1342,6 @@ void GTR::Renderer::updateIrradianceCache(GTR::Scene* scene)
 	}
 
 	std::cout << "Updating irradiance . . .";
-	//ePipelineMode prev = pipeline_mode;
-	//pipeline_mode = FORWARD;
-	//eRenderMode rend_prev = render_mode;
-	//render_mode = SHOW_SHADOWMAP;
 
 	int num_probes = irr->probes.size();
 	float probes_done = 0;
@@ -1345,8 +1353,6 @@ void GTR::Renderer::updateIrradianceCache(GTR::Scene* scene)
 		extractProbe(scene, irr->probes[i]);
 	}
 
-	//pipeline_mode = prev;
-	//render_mode = rend_prev;
 	std::cout << " Finished!" << std::endl;
 
 	storeIrradianceToTexture();
@@ -1456,7 +1462,6 @@ void GTR::Renderer::renderDecals(GTR::Scene* scene, Camera* camera) {
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
 
-	//optimizar --> sacarlos antes
 	for (int i = 0; i < scene->entities.size(); i++)
 	{
 		BaseEntity* ent = scene->entities[i];
@@ -1481,7 +1486,7 @@ void GTR::Renderer::renderPostFX(Camera* camera, Texture* texture)
 	int h = Application::instance->window_height;
 	Matrix44 inv_vp = camera->viewprojection_matrix;
 	inv_vp.inverse();
-	float t = (float)Application::instance->elapsed_time;
+	float t = (float)Application::instance->time;
 	float x_rnd = rand();
 	float y_rnd = rand();
 
@@ -1537,16 +1542,10 @@ void GTR::Renderer::renderPostFX(Camera* camera, Texture* texture)
 			shader->setUniform("u_camera_position", camera->eye);
 			break;
 		case FX_GRAIN:
-			if (noise_texture == NULL) {
-				noise_texture = new Texture();
-				noise_texture->create(512, 512, GL_RGB, GL_UNSIGNED_INT, false);
-				noise_texture->load("data/textures/noise.png", false);
-			}
 			shader = Shader::Get("grain");
 			shader->enable();
 			shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
-			shader->setUniform("u_uv_noise", Vector2(x_rnd,y_rnd));
-			shader->setTexture("u_noise_texture", noise_texture, 3);
+			shader->setUniform("u_strength", grain_strength);
 			shader->setUniform("u_time", t);
 			break;
 		case FX_CHROMATIC:
@@ -1559,6 +1558,9 @@ void GTR::Renderer::renderPostFX(Camera* camera, Texture* texture)
 			shader = Shader::Get("bloom");
 			shader->enable();
 			shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+			shader->setUniform("u_threshold", bloom_threshold);
+			shader->setUniform("u_soft_threshold", bloom_soft_threshold);
+			shader->setUniform("u_intensity", bloom_intensity);
 			break;
 		case FX_LENS_DISTORTION:
 			shader = Shader::Get("lens");
@@ -1572,7 +1574,7 @@ void GTR::Renderer::renderPostFX(Camera* camera, Texture* texture)
 				lut_texture->create(512, 512, GL_RGB, GL_UNSIGNED_INT, false);
 				lut_texture->load("data/textures/lut.png", false);
 			}
-			shader = Shader::Get("grain");
+			shader = Shader::Get("lut");
 			shader->enable();
 			shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
 			shader->setTexture("u_lut_texture", lut_texture, 3);
@@ -1582,6 +1584,12 @@ void GTR::Renderer::renderPostFX(Camera* camera, Texture* texture)
 			shader = Shader::Get("fxaa");
 			shader->enable();
 			shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+			break;
+		case FX_SHARPEN:
+			shader = Shader::Get("sharpen");
+			shader->enable();
+			shader->setUniform("u_iRes", Vector2(1.0 / (float)w, 1.0 / (float)h));
+			shader->setUniform("u_amount_contrast", sharpen_contrast);
 			break;
 		default:
 			break;

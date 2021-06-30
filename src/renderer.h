@@ -60,7 +60,8 @@ namespace GTR {
 		FX_BLOOM,
 		FX_LENS_DISTORTION,
 		FX_LUT,
-		FX_FXAA
+		FX_FXAA,
+		FX_SHARPEN
 	};
 
 	class renderCall {
@@ -191,7 +192,7 @@ namespace GTR {
 		bool freeze_prev_vp = false;
 		bool apply_post_fx = true;
 		bool use_reflection = true;
-		bool show_reflection_probes = true;
+		bool show_reflection_probes = false;
 		int light_camera;	//light to show on depth camera
 
 		//PostFX
@@ -199,6 +200,11 @@ namespace GTR {
 		int blur_size = 5;
 		float lens_distortion = 0.5;
 		float lut_amount = 0.5;
+		float bloom_soft_threshold = 0.5;
+		float bloom_threshold = 0.1;
+		float bloom_intensity = 2;
+		float sharpen_contrast = 0.5;
+		float grain_strength = 20;
 
 		Matrix44 vp_previous;
 

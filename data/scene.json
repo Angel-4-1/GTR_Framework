@@ -119,29 +119,12 @@
       "position": [ 615, 760, 130 ],
       "target": [ 565, 507, -14 ],
       "color": [ 0.857, 0.882, 0.7 ],
-      "intensity": 1.5,
+      "intensity": 0.9,
       "area_size": 2800,
       "max_dist": 1000,
       "cast_shadows": true,
       "shadow_bias": 0.003,
       "light_type": "DIRECTIONAL"
-    },
-    {
-      "name": "sponza",
-      "type": "PREFAB",
-      "filename": "prefabs/sponza/sponza.gltf",
-      "position": [ -200, 0, -900 ],
-      "scale" : [50, 50, 50]
-    },
-    {
-      "name": "sponzapointlight",
-      "type": "LIGHT",
-      "position": [ 118, 68, -915 ],
-      "angle": 0,
-      "color": [ 0.9, 0.4, 0.3 ],
-      "intensity": 11,
-      "max_dist": 350,
-      "light_type": "POINT"
     },
     {
       "name": "reflection",
